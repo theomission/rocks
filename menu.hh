@@ -7,6 +7,8 @@
 
 #include "commonmath.hh"
 
+class Camera;
+
 enum MenuStateFlag
 {
 	MENUSTATE_Active = 0x1,
@@ -28,7 +30,7 @@ public:
 	virtual void GetTitleDims(float &w, float &h) ;
 	virtual void DrawTitle(float x, float y, const Color& color) ;
 
-	virtual void Render() { }
+	virtual void Render(const Camera& curCamera) { }
 	virtual bool OnKey(int key, int mod) { return false; }
 	virtual bool OnMouse(int x, int y, int buttons) { return false; } 
 	virtual void OnActivate() {}
@@ -81,13 +83,16 @@ private:
 class SubmenuMenuItem : public MenuItem
 {
 public:
+	typedef std::vector<std::shared_ptr<MenuItem>> ChildListType;
 	SubmenuMenuItem(const std::string& name);
 	SubmenuMenuItem(const std::string& name, const std::vector<std::shared_ptr<MenuItem>>& children);
+	SubmenuMenuItem(const std::string& name, std::vector<std::shared_ptr<MenuItem>>&& children);
 
-	void Render() ;
+	void Render(const Camera& curCamera) ;
 	bool OnKey(int key, int mod) ;
 	void OnActivate();
 
+	void InsertChild(int index, const std::shared_ptr<MenuItem>& item);
 	void AppendChild(const std::shared_ptr<MenuItem>& item);
 
 	const std::vector<std::shared_ptr<MenuItem>>& GetChildren() const { return m_children; }
@@ -107,9 +112,10 @@ class TopMenuItem : public SubmenuMenuItem
 public:
 	TopMenuItem();
 	TopMenuItem(const std::vector<std::shared_ptr<MenuItem>>& children);
+	TopMenuItem(std::vector<std::shared_ptr<MenuItem>>&& children);
 
 	bool OnKey(int key, int mod) ;
-	void Render() ;
+	void Render(const Camera& curCamera) ;
 	void OnActivate ();
 };
 
@@ -117,11 +123,13 @@ public:
 class IntSliderMenuItem : public MenuItem
 {
 public:
-	IntSliderMenuItem(const std::string& name, std::function<int()> get, std::function<void(int)> set);
-	IntSliderMenuItem(const std::string& name, int* ival);
+	IntSliderMenuItem(const std::string& name, std::function<int()> get, std::function<void(int)> set, 
+		int scale = 1, const Limits<int>& lm = Limits<int>());
+	IntSliderMenuItem(const std::string& name, int* ival, 
+		int scale = 1, const Limits<int>& lm = Limits<int>());
 	
 	bool OnKey(int key, int mod) ;
-	void Render() ;
+	void Render(const Camera& curCamera) ;
 	void OnActivate() { UpdateData(); }
 private:
 	void UpdateData();
@@ -136,11 +144,12 @@ class FloatSliderMenuItem : public MenuItem
 {
 public:
 	FloatSliderMenuItem(const std::string& name, std::function<float()> get, std::function<void(float)> set,
-		float scale = 1.f);
-	FloatSliderMenuItem(const std::string& name, float* fval, float scale = 1.f);
+		float scale = 1.f, const Limits<float>& lm = Limits<float>());
+	FloatSliderMenuItem(const std::string& name, float* fval, float scale = 1.f,
+		const Limits<float>& lm = Limits<float>());
 	
 	bool OnKey(int key, int mod) ;
-	void Render() ;
+	void Render(const Camera& curCamera) ;
 	void OnActivate() { UpdateData(); }
 private:
 	void UpdateData();
@@ -160,7 +169,7 @@ public:
 		std::function<void(const Color&)> set);
 	
 	bool OnKey(int key, int mod) ;
-	void Render() ;
+	void Render(const Camera& curCamera) ;
 	void OnActivate() { UpdateData(); }
 private:
 	enum ColorSliderPosType {
@@ -187,13 +196,17 @@ private:
 class VecSliderMenuItem : public MenuItem
 {
 public:
-	VecSliderMenuItem(const std::string& name, vec3* val);
+	VecSliderMenuItem(const std::string& name, vec3* val,
+		float scale = 1.0f,
+		const Limits<vec3>& lm = Limits<vec3>());
 	VecSliderMenuItem(const std::string& name,
 		std::function<vec3()> get,
-		std::function<void(const vec3&)> set);
+		std::function<void(const vec3&)> set,
+		float scale,
+		const Limits<vec3>& lm = Limits<vec3>());
 	
 	bool OnKey(int key, int mod) ;
-	void Render() ;
+	void Render(const Camera& curCamera) ;
 	void OnActivate() { UpdateData(); }
 private:
 	enum VecSliderPosType {
@@ -208,7 +221,7 @@ private:
 	};
 	void UpdateData();
 
-	void DrawNormalVecView(float x, float y, float w, float h, const vec3& normal);
+	void DrawNormalVecView(const Camera& curCamera, float x, float y, float w, float h, const vec3& normal);
 
 	std::function<vec3()> m_get;
 	std::function<void(const vec3&)> m_set;
@@ -228,7 +241,7 @@ private:
 };
 
 void menu_SetTop(const std::shared_ptr<TopMenuItem>& top);
-void menu_Draw();
+void menu_Draw(const Camera& curCamera);
 void menu_Update(float dt);
 void menu_Key(int key, int mod);
 void menu_Mouse(int x, int y, int buttons);

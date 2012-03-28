@@ -1,3 +1,9 @@
-"cam.eye" = 8 : 41000000 0 : 0 2 : 40000000
-"cam.focus" = 0 : 0 0 : 0 0 : 0
-"cam.up" = 0 : 0 0 : 0 1 : 3f800000
+"cam.eye" = -266.953 : c3857a04 536.673 : 44062b15 154.928 : 431aed8b
+"cam.focus" = -266.522 : c38542d3 535.806 : 4405f39a 154.678 : 431aad7b
+"cam.up" = 0.111452 : 3de440bd -0.224058 : be656f88 0.968182 : 3f77dac7
+"cam.orbitFocus" = 0 : 0 0 : 0 0 : 0
+"cam.orbitStart" = 138.299 : 430a4c8d -77.0309 : c29a0fd2 40.9172 : 4223ab30
+"cam.orbitRate" = 0.0174532 : 3c8efa00
+"cam.orbitLength" = 619.1 : 441ac666
+"lighting.sundir" = 0.842214 : 3f579b53 0.109994 : 3de144c2 0.527771 : 3f071c07
+"lighting.suncolor" = 0.95 : 3f733333 0.9 : 3f666666 0.85 : 3f599999

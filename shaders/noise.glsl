@@ -12,7 +12,9 @@ float rand(vec2 coords)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// noise function is from https://github.com/ashima/webgl-noise/blob/master/src/classicnoise3D.glsl
+// noise function is from:
+// https://github.com/ashima/webgl-noise/blob/master/src/classicnoise3D.glsl
+// See README for copyright info.
 
 vec3 spline_c2(vec3 t)
 {
@@ -114,5 +116,25 @@ float pnoise(vec3 p)
 	vec2 ylerp = mix(zlerp.xy, zlerp.zw, interp.y);
 	float xlerp = mix(ylerp.x, ylerp.y, interp.x);
 	return 2.2 * xlerp;
+}
+
+float fbmNoise(vec3 pt, float h, float lacunarity, float octaves)
+{
+	int numOctaves = int(octaves);
+	float result = 0.0;
+
+	for(int i = 0; i < numOctaves; ++i)
+	{
+		result += pnoise(pt) * pow(lacunarity, -h * i);
+		pt *= lacunarity;
+	}
+
+	float remainder = octaves - numOctaves;
+	if(remainder > 0.0)
+	{
+		result += remainder * pnoise(pt) * pow(lacunarity, -h * numOctaves);
+	}
+
+	return result;
 }
 

@@ -4,8 +4,9 @@
 #include <cfloat>
 #include <SDL/SDL.h>
 #include <GL/glew.h>
-#include <ctime>
 #include <memory>
+#include <sstream>
+#include <sys/stat.h>
 #include "common.hh"
 #include "render.hh"
 #include "vec.hh"
@@ -22,67 +23,90 @@
 #include "task.hh"
 #include "ui.hh"
 #include "gputask.hh"
-
-////////////////////////////////////////////////////////////////////////////////
-// globals
-
-Screen g_screen(1024, 768);
-std::shared_ptr<Camera> g_curCamera;
+#include "timer.hh"
 
 ////////////////////////////////////////////////////////////////////////////////
 // file scope globals
-static float g_dt;
-static vec3 g_focus, g_defaultFocus, g_defaultEye, g_defaultUp;
-static std::shared_ptr<Camera> g_mainCamera;
+
+// cameras
+static std::shared_ptr<Camera> g_curCamera;
+static std::shared_ptr<Camera> g_mainCamera;	
 static std::shared_ptr<Camera> g_debugCamera;
 
-static int g_menuEnabled = 0;
-static int g_wireframe = 0;
+// main camera variables, used for saving/loading the camera
+static vec3 g_focus, g_defaultFocus, g_defaultEye, g_defaultUp;
 
-static float g_fpsDisplay = 0.f;
+// display toggles
+static int g_menuEnabled;
+static int g_wireframe;
+static int g_debugDisplay;
+
+// orbit cam
+static bool g_orbitCam = false;
+static float g_orbitAngle;
+static vec3 g_orbitFocus;
+static vec3 g_orbitStart;
+static float g_orbitRate;
+static float g_orbitLength;
+
+// debug cam
 static vec3 g_fakeFocus = {-10.f, 0.f, 0.f};
-static Viewframe g_debugViewframe;
 
+// fps tracking
+static float g_fpsDisplay;
 static int g_frameCount;
 static int g_frameSampleCount;
-static unsigned long long g_frameSampleTime;
-static unsigned long long g_lastTime = 0;
+static Timer g_frameTimer;
 
-////////////////////////////////////////////////////////////////////////////////
-// Helpers
+// dt tracking
+static float g_dt;
+static Clock g_timer;
 
-////////////////////////////////////////////////////////////////////////////////
-static std::shared_ptr<ShaderInfo> g_debugTexShader;
-enum DebugTexUniformLocType {
-	DTEXLOC_Tex1D,
-	DTEXLOC_Tex2D,
-	DTEXLOC_Channel,
-	DTEXLOC_Dims,
-	DTEXLOC_NUM,
-};
+// lighting
+static Color g_sunColor;
+static vec3 g_sundir;
 
-static std::vector<CustomShaderAttr> g_debugTexUniformNames = 
-{
-	{ DTEXLOC_Tex1D, "colorTex1d" },
-	{ DTEXLOC_Tex2D, "colorTex2d" },
-	{ DTEXLOC_Channel, "channel" },
-	{ DTEXLOC_Dims, "dims"},
-};
-
-////////////////////////////////////////////////////////////////////////////////
+// control vars for debug texture render
 static GLuint g_debugTexture;
-static int g_debugTextureSplit;
+static bool g_debugTextureSplit;
+
+// screenshots & recording
+static bool g_screenshotRequested = false;
+static bool g_recording = false;
+static int g_recordFps = 30;
+static int g_recordCurFrame;
+static int g_recordFrameCount = 300;
+static Limits<float> g_recordTimeRange;
+
+// demo specific stuff:
+
+// TODO
 
 ////////////////////////////////////////////////////////////////////////////////
-// tweak vars
+// Shaders
+
+// TODO
+
+////////////////////////////////////////////////////////////////////////////////
+// forward decls
+static void record_Start();
+
+////////////////////////////////////////////////////////////////////////////////
+// tweak vars - these are checked into git
 extern float g_tileDrawErrorThreshold;
 static std::vector<std::shared_ptr<TweakVarBase>> g_tweakVars = {
-	std::make_shared<TweakVector>("cam.eye", &g_defaultEye, vec3{8.f, 0.f, 2.f}),
+	std::make_shared<TweakVector>("cam.eye", &g_defaultEye, vec3(8.f, 0.f, 2.f)),
 	std::make_shared<TweakVector>("cam.focus", &g_defaultFocus),
-	std::make_shared<TweakVector>("cam.up", &g_defaultUp, vec3{0,0,1}),
+	std::make_shared<TweakVector>("cam.up", &g_defaultUp, vec3(0,0,1)),
+	std::make_shared<TweakVector>("cam.orbitFocus", &g_orbitFocus),
+	std::make_shared<TweakVector>("cam.orbitStart", &g_orbitStart, vec3(100,100,100)),
+	std::make_shared<TweakFloat>("cam.orbitRate", &g_orbitRate, M_PI/180.f),
+	std::make_shared<TweakFloat>("cam.orbitLength", &g_orbitLength, 1000.f),
+	std::make_shared<TweakVector>("lighting.sundir", &g_sundir, vec3(0,0,1)),
+	std::make_shared<TweakColor>("lighting.suncolor", &g_sunColor, Color(1,1,1)),
 };
 
-void SaveCurrentCamera()
+static void SaveCurrentCamera()
 {
 	g_defaultEye = g_mainCamera->GetPos();
 	g_defaultFocus = g_mainCamera->GetPos() + g_mainCamera->GetViewframe().m_fwd;
@@ -90,9 +114,11 @@ void SaveCurrentCamera()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Settings vars
+// Settings vars - don't get checked in to git
 static std::vector<std::shared_ptr<TweakVarBase>> g_settingsVars = {
+	std::make_shared<TweakBool>("cam.orbit", &g_orbitCam, false),
 	std::make_shared<TweakBool>("debug.wireframe", &g_wireframe, false),
+	std::make_shared<TweakBool>("debug.fpsDisplay", &g_debugDisplay, false),
 	std::make_shared<TweakBool>("debug.draw", 
 			[](){ return dbgdraw_IsEnabled(); },
 			[](bool enabled) { dbgdraw_SetEnabled(int(enabled)); },
@@ -101,16 +127,21 @@ static std::vector<std::shared_ptr<TweakVarBase>> g_settingsVars = {
 			[](){ return dbgdraw_IsDepthTestEnabled(); },
 			[](bool enabled) { dbgdraw_SetDepthTestEnabled(int(enabled)); },
 			true),
+
+	std::make_shared<TweakInt>("record.fps", &g_recordFps, 30),
+	std::make_shared<TweakInt>("record.count", &g_recordFrameCount, 300),
+	std::make_shared<TweakFloat>("record.timeStart", &g_recordTimeRange.m_min, 1.0),
+	std::make_shared<TweakFloat>("record.timeEnd", &g_recordTimeRange.m_max, 2.0),
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 // Camera swap
-bool camera_GetDebugCamera()
+static bool camera_GetDebugCamera()
 {
 	return (g_curCamera == g_debugCamera);
 }
 
-void camera_SetDebugCamera(bool useDebug)
+static void camera_SetDebugCamera(bool useDebug)
 {
 	if(useDebug) {
 		g_curCamera = g_debugCamera;
@@ -126,11 +157,21 @@ static std::shared_ptr<TopMenuItem> MakeMenu()
 	std::vector<std::shared_ptr<MenuItem>> cameraMenu = {
 		std::make_shared<VecSliderMenuItem>("eye", &g_defaultEye),
 		std::make_shared<VecSliderMenuItem>("focus", &g_defaultFocus),
+		std::make_shared<VecSliderMenuItem>("orbit focus", &g_orbitFocus),
+		std::make_shared<VecSliderMenuItem>("orbit start", &g_orbitStart),
+		std::make_shared<FloatSliderMenuItem>("orbit rate", &g_orbitRate),
+		std::make_shared<FloatSliderMenuItem>("orbit length", &g_orbitLength),
+		std::make_shared<BoolMenuItem>("toggle orbit cam", &g_orbitCam),
 		std::make_shared<ButtonMenuItem>("save current camera", SaveCurrentCamera)
+	};
+	std::vector<std::shared_ptr<MenuItem>> lightingMenu = {
+		std::make_shared<VecSliderMenuItem>("sundir", &g_sundir),
+		std::make_shared<ColorSliderMenuItem>("suncolor", &g_sunColor),
 	};
 	std::vector<std::shared_ptr<MenuItem>> debugMenu = {
 		std::make_shared<ButtonMenuItem>("reload shaders", render_RefreshShaders),
 		std::make_shared<BoolMenuItem>("wireframe", &g_wireframe),
+		std::make_shared<BoolMenuItem>("fps & info", &g_debugDisplay),
 		std::make_shared<BoolMenuItem>("debugcam", camera_GetDebugCamera, camera_SetDebugCamera),
 		std::make_shared<IntSliderMenuItem>("debug texture id", 
 			[&g_debugTexture](){return int(g_debugTexture);},
@@ -143,92 +184,58 @@ static std::shared_ptr<TopMenuItem> MakeMenu()
 			[](bool enabled) { dbgdraw_SetDepthTestEnabled(int(enabled)); }),
 	};
 	std::vector<std::shared_ptr<MenuItem>> tweakMenu = {
-		std::make_shared<SubmenuMenuItem>("cam", cameraMenu),
-		std::make_shared<SubmenuMenuItem>("debug", debugMenu),
+		std::make_shared<SubmenuMenuItem>("cam", std::move(cameraMenu)),
+		std::make_shared<SubmenuMenuItem>("lighting", std::move(lightingMenu)),
+		std::make_shared<SubmenuMenuItem>("debug", std::move(debugMenu)),
+	};
+	std::vector<std::shared_ptr<MenuItem>> recordMenu = {
+		std::make_shared<ButtonMenuItem>("take screenshot", [](){ g_screenshotRequested = true; }),
+		std::make_shared<IntSliderMenuItem>("record fps", &g_recordFps),
+		std::make_shared<IntSliderMenuItem>("record frame count", &g_recordFrameCount),
+		std::make_shared<FloatSliderMenuItem>("start time", &g_recordTimeRange.m_min),
+		std::make_shared<FloatSliderMenuItem>("end time", &g_recordTimeRange.m_max),
+		std::make_shared<ButtonMenuItem>("start", record_Start),
 	};
 	std::vector<std::shared_ptr<MenuItem>> topMenu = {
-		std::make_shared<SubmenuMenuItem>("tweak", tweakMenu)
+		std::make_shared<SubmenuMenuItem>("tweak", std::move(tweakMenu)),
+		std::make_shared<SubmenuMenuItem>("record", std::move(recordMenu)),
 	};
 	return std::make_shared<TopMenuItem>(topMenu);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-void drawDebugTexture(void)
+static void record_Start()
 {
-	if(g_debugTexture)
-	{	
-		GLint cur;
-		float x = 20, y = 20, w = 40, h = 350, scale = 1.f;
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_1D, g_debugTexture); 
-		glBindTexture(GL_TEXTURE_2D, 0);
-		glGetIntegerv(GL_TEXTURE_BINDING_1D, &cur);
-		bool is2d = (GLuint)cur != g_debugTexture;
-		if(is2d)
-		{
-			(void)glGetError(); // clear the error so it doesn't spam
-			glBindTexture(GL_TEXTURE_1D, 0);
-			glBindTexture(GL_TEXTURE_2D, g_debugTexture);
-		}
+	if(g_recording) return;
 
-		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	g_recordCurFrame = 0;
+	g_dt = 1.f / g_recordFps;
+	g_recording = true;
+}
 
-		const ShaderInfo* shader = g_debugTexShader.get();
-		GLuint program = shader->m_program;
-		GLint posLoc = shader->m_attrs[GEOM_Pos];
-		GLint uvLoc = shader->m_attrs[GEOM_Uv];
-		GLint mvpLoc = shader->m_uniforms[BIND_Mvp];
-		GLint tex1dLoc = shader->m_custom[DTEXLOC_Tex1D];
-		GLint tex2dLoc = shader->m_custom[DTEXLOC_Tex2D];
-		GLint channelLoc = shader->m_custom[DTEXLOC_Channel];
-		GLint dimsLoc = shader->m_custom[DTEXLOC_Dims];
+static void record_SaveFrame()
+{
+	ASSERT(g_recording);
 
-		glUseProgram(program);
-		glUniformMatrix4fv(mvpLoc, 1, 0, g_screen.m_proj.m);
-		glUniform1i(is2d ? tex2dLoc : tex1dLoc, 0);
-		glUniform1i(dimsLoc, is2d ? 2 : 1);
+	mkdir("frames", S_IRUSR | S_IWUSR | S_IXUSR);
+	std::stringstream sstr ;
+	sstr << "frames/frame_" << g_recordCurFrame << ".tga" ;
+	std::cout << "Saving frame " << sstr.str() << std::endl;
+	render_SaveScreen(sstr.str().c_str());
+}
 
-		if(!is2d) h = 710;
-		int channel = g_debugTextureSplit ? 0 : 4;
-		int channelMax = g_debugTextureSplit ? 4 : 5;
-		for(; channel < channelMax; ++channel)
-		{
-			glUniform1i(channelLoc, channel);
-			if(!is2d) w = 40;
-			else w = 350;
+static void record_Advance()
+{
+	ASSERT(g_recording);
 
-			if(!g_debugTextureSplit) { if(is2d) { w = 710; } h = 710; }
-
-			glBegin(GL_TRIANGLE_STRIP);
-			glVertexAttrib2f(uvLoc, 0, 0); glVertexAttrib3f(posLoc, x,y,0.f);
-			glVertexAttrib2f(uvLoc, scale, 0); glVertexAttrib3f(posLoc, x+w,y,0.f);
-			glVertexAttrib2f(uvLoc, 0, scale); glVertexAttrib3f(posLoc, x,y+h,0.f);
-			glVertexAttrib2f(uvLoc, scale, scale); glVertexAttrib3f(posLoc, x+w,y+h,0.f);
-			glEnd();
-
-			if(!is2d)
-			{
-				x = x+w+10;
-			}
-			else
-			{
-				if((channel & 1) == 0)
-				{
-					x = x + w + 10;
-				}
-				else
-				{
-					x = 20;
-					y = y + h + 10;
-				}
-			}
-		}
-		checkGlError("debug draw texture");
-	}
+	++g_recordCurFrame;
+	if(g_recordCurFrame >= g_recordFrameCount)
+		g_recording = false;
+	std::cout << "done." << std::endl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-void draw(Framedata& frame)
+static void draw(Framedata& frame)
 {
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glDisable(GL_SCISSOR_TEST);
@@ -237,29 +244,43 @@ void draw(Framedata& frame)
 	glEnable(GL_DEPTH_TEST);
 	int scissorHeight = g_screen.m_width/1.777;
 	glScissor(0, 0.5*(g_screen.m_height - scissorHeight), g_screen.m_width, scissorHeight);
-	if(!camera_GetDebugCamera()) glEnable(GL_SCISSOR_TEST);
+	if(!camera_GetDebugCamera()) {
+		glEnable(GL_SCISSOR_TEST);
+	}
+
 	if(g_wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	else glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+	//vec3 normalizedSundir = Normalize(g_sundir);
 
 	////////////////////////////////////////////////////////////////////////////////
 	if(!camera_GetDebugCamera()) glEnable(GL_SCISSOR_TEST);
 	glEnable(GL_DEPTH_TEST);
 
-	// TODO demo code here
-	
+	// TODO render here
+
+	// everything below here is feedback for the user, so record the frame if we're recording
+	if(g_recording)
+	{
+		record_SaveFrame();
+		record_Advance();
+	}
+
+	// debug draw
 	dbgdraw_Render(*g_curCamera);
 	checkGlError("draw(): post dbgdraw");
 
 	glDisable(GL_SCISSOR_TEST);
 	glDisable(GL_DEPTH_TEST);
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	drawDebugTexture();
+	render_drawDebugTexture(g_debugTexture, g_debugTextureSplit);
 
 	if(g_menuEnabled)
-		menu_Draw();
+		menu_Draw(*g_curCamera);
 
 	checkGlError("draw(): post menu");
 
+	if(g_debugDisplay)
 	{
 		char fpsStr[32] = {};
 		static Color fpsCol = {1,1,1};
@@ -275,22 +296,23 @@ void draw(Framedata& frame)
 	task_RenderProgress();
 	checkGlError("end draw");
 
+	if(g_screenshotRequested) {
+		render_SaveScreen("screenshot.tga");
+		g_screenshotRequested = false;
+	}
+	
 	SDL_GL_SwapBuffers();
 	checkGlError("swap");
+	
 }
 
-void InitializeShaders(void)
-{
-	g_debugTexShader = render_CompileShader("shaders/debugtex2d.glsl", g_debugTexUniformNames);
-	checkGlError("InitializeShaders");
-}
-
-void initialize(void)
+////////////////////////////////////////////////////////////////////////////////	
+static void initialize()
 {
 	task_Startup(3);
 	dbgdraw_Init();
-	InitializeShaders();
-	framemem_Init();
+	render_Init();
+	framemem_Init(); 
 	font_Init();
 	menu_SetTop(MakeMenu());
 	ui_Init();
@@ -305,34 +327,57 @@ void initialize(void)
 	tweaker_LoadVars(".settings", g_settingsVars);
 }
 
-void update(Framedata& frame)
+////////////////////////////////////////////////////////////////////////////////
+static void orbitcam_Update()
 {
-	struct timespec current_time;
-	clock_gettime(CLOCK_MONOTONIC, &current_time);
-	unsigned long long timeUsec = (unsigned long long)(current_time.tv_sec * 1000000) +
-		(unsigned long long)(current_time.tv_nsec / 1000);
-	
-	unsigned long long diffTime = timeUsec - g_lastTime;
-	if(diffTime > 16000)
+	if(!g_orbitCam) return;
+		
+	static const vec3 kUp(0,0,1);
+	vec3 startPos = g_orbitStart;
+	mat4 rotZ = RotateAround(kUp, g_orbitAngle);
+	vec3 pos = TransformPoint(rotZ, startPos);
+
+	pos *= g_orbitLength / Length(pos);
+
+	g_mainCamera->LookAt(g_orbitFocus, pos, kUp);
+
+	g_orbitAngle += g_dt * g_orbitRate;
+	g_orbitAngle = AngleWrap(g_orbitAngle);
+}
+
+static void updateFps()
+{
+	int numFrames = g_frameCount - g_frameSampleCount;
+	if(numFrames >= 30 * 5)
 	{
-		g_lastTime = timeUsec;
-		float dt = diffTime / 1e6f;
-		g_dt = dt;
-
-		// move stuff with dt
-	}
-	else g_dt = 0.f;
-
-	if(g_frameCount - g_frameSampleCount > 30 * 5)
-	{
-		unsigned long long diffTime = timeUsec - g_frameSampleTime;
-		g_frameSampleTime = timeUsec;
-
-		float delta = diffTime / 1e6f;
-		float fps = (g_frameCount - g_frameSampleCount) / delta;
+		g_frameTimer.Stop();
+		
+		float delta = g_frameTimer.GetTime();
+		float fps = (numFrames) / delta;
 		g_frameSampleCount = g_frameCount;
 		g_fpsDisplay = fps;
+
+		g_frameTimer.Start();
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+static void update(Framedata& frame)
+{
+	if(!g_recording)
+	{
+		constexpr float kMinDt = 1.0f/60.f;
+		g_timer.Step(kMinDt);
+		g_dt = g_timer.GetDt();
+	}
+	else
+	{
+		g_dt = 1.0 / g_recordFps;
+	}
+
+	orbitcam_Update();
+
+	updateFps();
 
 	g_curCamera->Compute();
 
@@ -344,6 +389,7 @@ void update(Framedata& frame)
 	task_Update();
 }
 
+////////////////////////////////////////////////////////////////////////////////
 enum CameraDirType {
 	CAMDIR_FWD, 
 	CAMDIR_BACK,
@@ -351,7 +397,7 @@ enum CameraDirType {
 	CAMDIR_RIGHT
 };
 
-void move_camera(int dir)
+static void move_camera(int dir)
 {	
 	int mods = SDL_GetModState();
 	float kScale = 50.0;
@@ -369,7 +415,8 @@ void move_camera(int dir)
 	g_curCamera->MoveBy(off);
 }
 
-void resize(int w, int h)
+////////////////////////////////////////////////////////////////////////////////
+static void resize(int w, int h)
 {
 	g_screen.Resize(w,h);
 	g_mainCamera->SetAspect(g_screen.m_aspect);
@@ -379,6 +426,7 @@ void resize(int w, int h)
 	glViewport(0,0,w,h);
 }
 
+////////////////////////////////////////////////////////////////////////////////
 int main(void)
 {
 	SDL_Event event;
@@ -392,8 +440,10 @@ int main(void)
 
 	glEnable(GL_TEXTURE_1D);
 	glEnable(GL_TEXTURE_2D);
+	glEnable(GL_TEXTURE_3D);
 
 	initialize();
+	g_frameTimer.Start();
 
 	checkGlError("after init");
 	int done = 0;
@@ -437,7 +487,7 @@ int main(void)
 										--g_debugTexture;
 									break;
 								case SDLK_KP_ENTER:
-									g_debugTextureSplit = 1 ^ g_debugTextureSplit;
+									g_debugTextureSplit = !g_debugTextureSplit;
 									break;
 								case SDLK_PAGEUP:
 									{
@@ -451,6 +501,11 @@ int main(void)
 										g_curCamera->MoveBy(off);
 									}
 									break;
+								case SDLK_p:
+									if(event.key.keysym.mod & KMOD_SHIFT)
+										g_screenshotRequested = true;
+									break;
+
 								default: break;
 							}
 						}
@@ -556,8 +611,7 @@ int main(void)
 			{
 				int mods = SDL_GetModState();
 				const Uint8* keystate = SDL_GetKeyState(NULL);
-				int i;
-				for(i = 0; i < SDLK_LAST; ++i)
+				for(int i = 0; i < SDLK_LAST; ++i)
 				{
 					if(keystate[i])
 						menu_Key(i, mods);

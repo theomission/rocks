@@ -11,11 +11,6 @@
 #include "camera.hh"
 
 ////////////////////////////////////////////////////////////////////////////////
-// screen width and height
-extern Screen g_screen;
-extern std::shared_ptr<Camera> g_curCamera;
-
-////////////////////////////////////////////////////////////////////////////////
 static std::shared_ptr<TopMenuItem> g_top;
 static std::vector<std::shared_ptr<MenuItem>> g_itemStack;
 static std::vector<std::shared_ptr<MenuItem>> g_updating;
@@ -23,10 +18,10 @@ static std::vector<std::shared_ptr<MenuItem>> g_updating;
 constexpr static float kFontSize = 18.f;
 constexpr static float kHSpace = 10.f;
 constexpr static float kVSpace = 15.f;
-static Color kTextColor = {0.2,0.6f,0.2f};
-static Color kTextSelColor = {0.4f,0.6f,0.2f};
-static Color kTextActiveColor = {0.8f,0.8f,0.2f};
-static Color kColWhite = {1,1,1};
+static const Color kTextColor = {0.2,0.6f,0.2f};
+static const Color kTextSelColor = {0.4f,0.6f,0.2f};
+static const Color kTextActiveColor = {0.8f,0.8f,0.2f};
+static const Color kColWhite = {1,1,1};
 	
 constexpr static float kInc = 1.f;
 constexpr static float kLargeInc = 10.f;
@@ -238,6 +233,18 @@ SubmenuMenuItem::SubmenuMenuItem(const std::string& name,
 	, m_pos(0)
 {
 }
+SubmenuMenuItem::SubmenuMenuItem(const std::string& name,
+	std::vector<std::shared_ptr<MenuItem>>&& children)
+	: MenuItem(name)
+	, m_pos(0)
+{
+	m_children.swap(children);
+}
+
+void SubmenuMenuItem::InsertChild(int index, const std::shared_ptr<MenuItem>& item)
+{
+	m_children.insert(m_children.begin() + index, item);
+}
 
 void SubmenuMenuItem::AppendChild(const std::shared_ptr<MenuItem>& item)
 {
@@ -276,7 +283,7 @@ void SubmenuMenuItem::OnActivate()
 	}
 }
 
-void SubmenuMenuItem::Render()
+void SubmenuMenuItem::Render(const Camera& curCamera)
 {
 	menu_DrawQuad(m_x, m_y, m_w, m_h, 1.f);
 
@@ -297,7 +304,7 @@ void SubmenuMenuItem::Render()
 
 	for(auto child: m_children)
 		if(child->HasFlag(MENUSTATE_Active))
-			child->Render();
+			child->Render(curCamera);
 }
 
 bool SubmenuMenuItem::OnKey(int key, int mod)
@@ -359,6 +366,10 @@ TopMenuItem::TopMenuItem(const std::vector<std::shared_ptr<MenuItem>>& children)
 	: SubmenuMenuItem("top", children)
 {}
 
+TopMenuItem::TopMenuItem(std::vector<std::shared_ptr<MenuItem>>&& children)
+	: SubmenuMenuItem("top", children)
+{}
+
 bool TopMenuItem::OnKey(int key, int mod)
 {
 	auto selected = GetSelected();
@@ -411,7 +422,7 @@ void TopMenuItem::OnActivate()
 	}
 }
 
-void TopMenuItem::Render()
+void TopMenuItem::Render(const Camera& curCamera)
 {
 	menu_DrawQuad(0.f, 0.f, m_w, m_h, 1.f);
 	float x =  kHSpace; 
@@ -420,34 +431,43 @@ void TopMenuItem::Render()
 	for(int i = 0, c = GetChildren().size(); i < c; ++i)	
 	{
 		auto child = GetChildren()[i];
+		float titlew,titleh;
+		child->GetTitleDims(titlew, titleh);
 		const Color* col = (GetPos() == i) ? &kTextSelColor : &kTextColor;
 		if(child->HasFlag(MENUSTATE_Active)) col = &kTextActiveColor;
 		child->DrawTitle(x, y, *col);
-		x += 2.f * kHSpace;
+		x += 2.f * kHSpace + titlew;
 	}
 
 	for(auto child: GetChildren())
 		if(child->HasFlag(MENUSTATE_Active))
-			child->Render();
+			child->Render(curCamera);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-IntSliderMenuItem::IntSliderMenuItem(const std::string& name, std::function<int()> get, std::function<void(int)> set)
+IntSliderMenuItem::IntSliderMenuItem(const std::string& name,
+	std::function<int()> get,
+	std::function<void(int)> set,
+	int scale,
+	const Limits<int>& lm)
 	: MenuItem(name)
 	, m_get(get)
 	, m_set(set) 
-	, m_limits()
-	, m_scale(1)
+	, m_limits(lm)
+	, m_scale(Max(scale,1))
 {
 	UpdateData();
 }
 	
-IntSliderMenuItem::IntSliderMenuItem(const std::string& name, int* ival)
+IntSliderMenuItem::IntSliderMenuItem(const std::string& name,
+	int* ival,
+	int scale,
+	const Limits<int>& lm)
 	: MenuItem(name)
 	, m_get([=](){ return *ival; })
 	, m_set([=](int val){ *ival = val; }) 
-	, m_limits()
-	, m_scale(1)
+	, m_limits(lm)
+	, m_scale(Max(scale,1))
 {
 	UpdateData();
 }
@@ -467,7 +487,7 @@ void IntSliderMenuItem::UpdateData()
 	m_h = h;
 }
 
-void IntSliderMenuItem::Render()
+void IntSliderMenuItem::Render(const Camera& curCamera)
 {
 	menu_DrawQuad(m_x, m_y, m_w, m_h, 1.f);
 	font_Print(m_x + kHSpace, m_y + m_h - kVSpace, m_str.c_str(), kColWhite, kFontSize);
@@ -499,11 +519,12 @@ FloatSliderMenuItem::FloatSliderMenuItem(
 	const std::string& name,
 	std::function<float()> get,
 	std::function<void(float)> set, 
-	float scale)
+	float scale,
+	const Limits<float>& lm)
 	: MenuItem(name)
 	, m_get(get)
 	, m_set(set)
-	, m_limits()
+	, m_limits(lm)
 	, m_scale(scale)
 {
 	UpdateData();
@@ -512,11 +533,12 @@ FloatSliderMenuItem::FloatSliderMenuItem(
 FloatSliderMenuItem::FloatSliderMenuItem(
 	const std::string& name,
 	float* fval,
-	float scale)
+	float scale,
+	const Limits<float>& lm)
 	: MenuItem(name)
 	, m_get([=](){ return *fval; })
 	, m_set([=](float val) { *fval = val; })
-	, m_limits()
+	, m_limits(lm)
 	, m_scale(scale)
 {
 	UpdateData();
@@ -535,7 +557,7 @@ void FloatSliderMenuItem::UpdateData()
 	m_h = h;
 }
 
-void FloatSliderMenuItem::Render()
+void FloatSliderMenuItem::Render(const Camera& curCamera)
 {
 	menu_DrawQuad(m_x, m_y, m_w, m_h, 1.f);
 	font_Print(m_x + kHSpace, m_y + m_h - kVSpace, m_str.c_str(), kColWhite, kFontSize);
@@ -617,7 +639,7 @@ void ColorSliderMenuItem::UpdateData()
 	}
 }
 
-void ColorSliderMenuItem::Render()
+void ColorSliderMenuItem::Render(const Camera& curCamera)
 {
 	menu_DrawQuad(m_x, m_y, m_w, m_h, 1.f);
 
@@ -676,6 +698,7 @@ bool ColorSliderMenuItem::OnKey(int key, int mod)
 	}
 
 	Color cur = m_get();
+	Color old = cur;
 	switch(m_pos)
 	{
 		case COLSLIDE_Red:
@@ -689,7 +712,8 @@ bool ColorSliderMenuItem::OnKey(int key, int mod)
 			break;
 		default:break;
 	}
-	m_set(cur);
+	if(old != cur)
+		m_set(cur);
 	UpdateData();
 	return true;
 }
@@ -697,29 +721,34 @@ bool ColorSliderMenuItem::OnKey(int key, int mod)
 ////////////////////////////////////////////////////////////////////////////////
 VecSliderMenuItem::VecSliderMenuItem(const std::string& name,
 	std::function<vec3()> get,
-	std::function<void(const vec3&)> set)
+	std::function<void(const vec3&)> set,
+	float scale,
+	const Limits<vec3>& lm)
 	: MenuItem(name)
 	, m_get(get)
 	, m_set(set)
-	, m_limits()
-	, m_scale(1.f)
+	, m_limits(lm)
+	, m_scale(scale)
 	, m_pos(0)
 {
 	UpdateData();
 }
 
-VecSliderMenuItem::VecSliderMenuItem(const std::string& name, vec3* val)
+VecSliderMenuItem::VecSliderMenuItem(const std::string& name, vec3* val,
+	float scale,
+	const Limits<vec3>& lm)
 	: MenuItem(name)
 	, m_get([=]() { return *val; })
 	, m_set([=](const vec3& v) { *val = v; })
-	, m_limits()
-	, m_scale(1.f)
+	, m_limits(lm)
+	, m_scale(scale)
 	, m_pos(0)
 {
 	UpdateData();
 }
 	
-void VecSliderMenuItem::DrawNormalVecView(float x, float y, float w, float h, const vec3& normal)
+void VecSliderMenuItem::DrawNormalVecView(const Camera& curCamera, 
+	float x, float y, float w, float h, const vec3& normal)
 {
 	GLint mvpLoc = g_normalViewShader->m_uniforms[BIND_Mvp];
 	GLint colorLoc = g_normalViewShader->m_attrs[GEOM_Color];
@@ -733,9 +762,8 @@ void VecSliderMenuItem::DrawNormalVecView(float x, float y, float w, float h, co
 	glClearColor(0.05f,0.05f,0.05f,1.f);
 	glClear(GL_DEPTH_BUFFER_BIT|GL_COLOR_BUFFER_BIT);
 
-	Camera localcamera = *g_curCamera;
-	// TODO this is kinda hacky
-	localcamera.SetPos(-4.f * g_curCamera->GetViewframe().m_fwd);
+	Camera localcamera = curCamera;
+	localcamera.SetPos(-4.f * curCamera.GetViewframe().m_fwd);
 	localcamera.Compute();
 	mat4 proj = Compute3DProj(30.f, w/h, 0.1, 5);
 	mat4 mvp = proj * localcamera.GetView();
@@ -838,13 +866,13 @@ void VecSliderMenuItem::UpdateData()
 	}
 }
 
-void VecSliderMenuItem::Render()
+void VecSliderMenuItem::Render(const Camera& curCamera)
 {
 	menu_DrawQuad(m_x, m_y, m_w, m_h, 1.f);
 	vec3 val = m_get();
 	vec3 nval = Normalize(val);
 
-	DrawNormalVecView(m_x+1.f, m_y+1.f, kDisplaySize-2.f, kDisplaySize-2.f, nval);
+	DrawNormalVecView(curCamera, m_x+1.f, m_y+1.f, kDisplaySize-2.f, kDisplaySize-2.f, nval);
 	float x = m_x + kHSpace;
 	float y = m_y + kDisplaySize + kVSpace;
 
@@ -908,6 +936,7 @@ bool VecSliderMenuItem::OnKey(int key, int mod)
 	}
 
 	vec3 val = m_get();
+	vec3 old = val;
 	float radAmt = (M_PI / 180.f) * incAmt;
 	mat4 rotmat;
 	static const vec3 kXAxis = {1,0,0};
@@ -944,8 +973,12 @@ bool VecSliderMenuItem::OnKey(int key, int mod)
 			break;
 		default:break;
 	}
-	m_set(m_limits(val));
-	UpdateData();
+	vec3 newVal = m_limits(val);
+	if(newVal != old)
+	{
+		m_set(newVal);
+		UpdateData();
+	}
 	return true;
 }
 
@@ -982,9 +1015,9 @@ void menu_Update(float dt)
 	g_updating.erase(newEnd, g_updating.end());
 }
 
-void menu_Draw()
+void menu_Draw(const Camera& curCamera)
 {
-	if(g_top) g_top->Render();
+	if(g_top) g_top->Render(curCamera);
 }
 
 static void menu_ActivateMenuItem(const std::shared_ptr<MenuItem>& item)
