@@ -359,10 +359,10 @@ void ComputeProgram::Recompile()
 
 				size_t logSize ;
 				clGetProgramBuildInfo(m_program, dev, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logSize);
-				std::vector<char> log(logSize+1);
+				std::vector<char> log(logSize);
 				clGetProgramBuildInfo(m_program, dev, CL_PROGRAM_BUILD_LOG, logSize, &log[0], nullptr);
 
-				std::cerr << "Build error on device " << str << std::endl
+				std::cerr << "Build error for " << m_filename << " on device " << str << std::endl
 					<< &log[0] << std::endl;
 			}
 		}
