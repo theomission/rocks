@@ -172,6 +172,38 @@ void TweakVector::Write(TokWriter& writer)
 	writer.Float(v.z);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+TweakString::TweakString(const char* name, std::string* var, const char* def)
+	: TweakVarBase(name)
+	, m_get([=](){return *var;})
+	, m_set([=](const std::string& s) { *var = s;})
+	, m_default(def)
+{
+}
+
+TweakString::TweakString(const char* name,
+		std::function<std::string()> get,
+		std::function<void(const std::string&)> set,
+		const char* def)
+	: TweakVarBase(name)
+	, m_get(get)
+	, m_set(set)
+	, m_default(def)
+{
+}
+
+void TweakString::Parse(TokParser& parser)
+{
+	char buf[256]={};
+	parser.GetString(buf,sizeof(buf));
+	m_set(buf);
+}
+
+void TweakString::Write(TokWriter& writer)
+{
+	std::string s = m_get();
+	writer.String(s.c_str());
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 bool tweaker_LoadVars(const char* filename, const std::vector<std::shared_ptr<TweakVarBase>>& vars)

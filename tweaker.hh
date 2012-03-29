@@ -118,6 +118,23 @@ private:
 	vec3 m_default;
 };
 
+class TweakString : public TweakVarBase
+{
+public:
+	TweakString(const char* name, std::string* var, const char* def = "");
+	TweakString(const char* name,
+		std::function<std::string()> get,
+		std::function<void(const std::string&)> set,
+		const char* def = "");
+	void Parse(TokParser& parser);
+	void Write(TokWriter& writer);
+	void Reset() { m_set(m_default); }
+private:		
+	std::function<std::string()> m_get;
+	std::function<void(const std::string&)> m_set;
+	std::string m_default;
+};
+
 bool tweaker_LoadVars(const char* filename, const std::vector<std::shared_ptr<TweakVarBase>>& vars);
 bool tweaker_SaveVars(const char* filename, const std::vector<std::shared_ptr<TweakVarBase>>& vars);
 

@@ -5,15 +5,16 @@ endif
 
 COMPILE=g++
 DEFINES=
-NAME=demo
+NAME=rocks
 CPPFLAGS=-std=c++0x -MMD -MP -Wall -fno-math-errno -ffast-math -pthread -fno-exceptions -fno-rtti 
+INCLUDE= 
 
 ifeq ($(config),release)
 	DEFINES += -DRELEASE
 	OBJDIR = obj/release
 	TARGETDIR = .
 	TARGET = $(TARGETDIR)/$(NAME)-z
-	CPPFLAGS += -O3 $(DEFINES)
+	CPPFLAGS += -O3 $(DEFINES) $(INCLUDES)
 endif
 
 ifeq ($(config),debug)
@@ -21,12 +22,12 @@ ifeq ($(config),debug)
 	OBJDIR = obj/debug
 	TARGETDIR = .
 	TARGET = $(TARGETDIR)/$(NAME)-d
-	CPPFLAGS += -g -ggdb $(DEFINES)
+	CPPFLAGS += -g -ggdb $(DEFINES) $(INCLUDES)
 endif
 	
-#	INCLUDES =
+INCLUDES = -I/usr/local/cuda/include
 LDFLAGS =
-LIBS = -lGL -lGLU -lSDL -lGLEW -lrt
+LIBS = -lGL -lGLU -lSDL -lGLEW -lrt -lOpenCL
 
 LINKCMD = $(COMPILE) -o $(TARGET) $(OBJECTS) $(LDFLAGS) $(LIBS)
 
@@ -50,6 +51,7 @@ OBJECTS := \
 	$(OBJDIR)/poolmem.o \
 	$(OBJDIR)/ui.o \
 	$(OBJDIR)/timer.o \
+	$(OBJDIR)/compute.o \
 
 .PHONY: clean strip
 
@@ -128,6 +130,9 @@ $(OBJDIR)/ui.o: ui.cpp
 
 $(OBJDIR)/timer.o: timer.cpp
 	$(COMPILE) $(CPPFLAGS) -o "$@" -c "$<"
+
+$(OBJDIR)/compute.o: compute.cpp
+	$(COMPILE) $(CPPFLAGS) -Wno-comment -o "$@" -c "$<"
 
 -include $(OBJECTS:%.o=%.d)
 

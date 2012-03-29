@@ -24,6 +24,7 @@
 #include "ui.hh"
 #include "gputask.hh"
 #include "timer.hh"
+#include "compute.hh"
 
 ////////////////////////////////////////////////////////////////////////////////
 // file scope globals
@@ -78,9 +79,10 @@ static int g_recordCurFrame;
 static int g_recordFrameCount = 300;
 static Limits<float> g_recordTimeRange;
 
-// demo specific stuff:
+// default compute stuff
+std::string g_defaultComputeDevice;
 
-// TODO
+// demo specific stuff:
 
 ////////////////////////////////////////////////////////////////////////////////
 // Shaders
@@ -90,6 +92,7 @@ static Limits<float> g_recordTimeRange;
 ////////////////////////////////////////////////////////////////////////////////
 // forward decls
 static void record_Start();
+static void generateRockTexture();
 
 ////////////////////////////////////////////////////////////////////////////////
 // tweak vars - these are checked into git
@@ -132,6 +135,7 @@ static std::vector<std::shared_ptr<TweakVarBase>> g_settingsVars = {
 	std::make_shared<TweakInt>("record.count", &g_recordFrameCount, 300),
 	std::make_shared<TweakFloat>("record.timeStart", &g_recordTimeRange.m_min, 1.0),
 	std::make_shared<TweakFloat>("record.timeEnd", &g_recordTimeRange.m_max, 2.0),
+	std::make_shared<TweakString>("compute.device", &g_defaultComputeDevice)
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -183,10 +187,14 @@ static std::shared_ptr<TopMenuItem> MakeMenu()
 			[](){ return dbgdraw_IsDepthTestEnabled(); },
 			[](bool enabled) { dbgdraw_SetDepthTestEnabled(int(enabled)); }),
 	};
+	std::vector<std::shared_ptr<MenuItem>> textureMenu = {
+		std::make_shared<ButtonMenuItem>("regenerate", [](){ generateRockTexture(); }),
+	};
 	std::vector<std::shared_ptr<MenuItem>> tweakMenu = {
 		std::make_shared<SubmenuMenuItem>("cam", std::move(cameraMenu)),
 		std::make_shared<SubmenuMenuItem>("lighting", std::move(lightingMenu)),
 		std::make_shared<SubmenuMenuItem>("debug", std::move(debugMenu)),
+		std::make_shared<SubmenuMenuItem>("texture", std::move(textureMenu)),
 	};
 	std::vector<std::shared_ptr<MenuItem>> recordMenu = {
 		std::make_shared<ButtonMenuItem>("take screenshot", [](){ g_screenshotRequested = true; }),
@@ -196,9 +204,13 @@ static std::shared_ptr<TopMenuItem> MakeMenu()
 		std::make_shared<FloatSliderMenuItem>("end time", &g_recordTimeRange.m_max),
 		std::make_shared<ButtonMenuItem>("start", record_Start),
 	};
+	std::vector<std::shared_ptr<MenuItem>> computeMenu = {
+		compute_CreateDeviceMenu(),
+	};
 	std::vector<std::shared_ptr<MenuItem>> topMenu = {
 		std::make_shared<SubmenuMenuItem>("tweak", std::move(tweakMenu)),
 		std::make_shared<SubmenuMenuItem>("record", std::move(recordMenu)),
+		std::make_shared<SubmenuMenuItem>("compute", std::move(computeMenu)),
 	};
 	return std::make_shared<TopMenuItem>(topMenu);
 }
@@ -307,24 +319,38 @@ static void draw(Framedata& frame)
 }
 
 ////////////////////////////////////////////////////////////////////////////////	
+static void generateRockTexture()
+{
+	auto rockProgram = compute_CompileProgram("programs/rock.cl");
+	if(!rockProgram) 
+		return;
+	auto rockKernel = rockProgram->CreateKernel("generateRockTexture");
+	if(!rockKernel)
+		return;
+}
+
+////////////////////////////////////////////////////////////////////////////////	
 static void initialize()
 {
-	task_Startup(3);
+	tweaker_LoadVars(".settings", g_settingsVars);
+	tweaker_LoadVars("tweaker.txt", g_tweakVars);
+
+	//task_Startup(3);
 	dbgdraw_Init();
 	render_Init();
 	framemem_Init(); 
 	font_Init();
 	menu_SetTop(MakeMenu());
 	ui_Init();
+	compute_Init(g_defaultComputeDevice.c_str());
+	g_defaultComputeDevice = compute_GetCurrentDeviceName();
+	generateRockTexture();
 
 	g_mainCamera = std::make_shared<Camera>(30.f, g_screen.m_aspect);
 	g_debugCamera = std::make_shared<Camera>(30.f, g_screen.m_aspect);
 
-	tweaker_LoadVars("tweaker.txt", g_tweakVars);
 	g_mainCamera->LookAt(g_defaultFocus, g_defaultEye, Normalize(g_defaultUp));
 	g_curCamera = g_mainCamera;
-
-	tweaker_LoadVars(".settings", g_settingsVars);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
