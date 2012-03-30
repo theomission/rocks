@@ -29,7 +29,7 @@ void main()
 	vec3 xfmNormal = normalize((modelIT * vec4(normal, 0)).xyz);
 	vNormal = xfmNormal;
 	vToEye = eyePos - pos;
-	vCoord = xfmNormal.xz * 0.5 + 0.5;//asin(xfmNormal.xz) * invPI + vec2(0.5);
+	vCoord = asin(xfmNormal.xy) * invPI + vec2(0.5);
 }
 #endif
 
@@ -87,7 +87,7 @@ void main()
 	float ambientLight = Ka * ambient ;
 
 	vec3 combined = albedo * sunColor * (diffuseLight + specularLight + ambientLight);
-	 combined = pow(combined, vec3(2.2));
+	combined = pow(combined, vec3(2.2));
 	outColor = vec4(combined, 1);
 }
 #endif

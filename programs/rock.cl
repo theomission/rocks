@@ -31,11 +31,11 @@ __kernel void generateRockTexture(
 	npt *= scale;
 
 	float baseMarble = marble(npt, marbleTurb, 2.0, marbleDepth);
-	baseMarble *= baseMarble;
 	float3 result = mix(baseColor0, baseColor1, 1.0 - baseMarble);
 	float heightResult = 0.5 * baseMarble;
 
-	float deepMarble = 1.0 - marble(npt, marbleTurb, 32.0, marbleDepth);
+	float deepMarble = 1.0 - marble(npt, marbleTurb, 8.0, marbleDepth);
+	deepMarble *= deepMarble;
 	deepMarble *= deepMarble;
 	result = mix(result, darkColor, deepMarble);
 
@@ -48,6 +48,7 @@ __kernel void generateRockTexture(
 	heightResult *= 1.0 - noiseScaleHeight * noiseVal;
 
 	float4 color = (float4)(result,1);
+	color = pow(color, 2.2);
 	float4 height = (float4)(heightResult);
 	
 	write_imagef(outputImage, coords, color);
