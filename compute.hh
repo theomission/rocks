@@ -7,6 +7,8 @@
 
 class SubmenuMenuItem;
 class ComputeKernel;
+class ComputeBuffer;
+class ComputeImage;
 
 ////////////////////////////////////////////////////////////////////////////////
 class ComputeProgram
@@ -25,11 +27,39 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////
+class ComputeEvent
+{
+public:
+	ComputeEvent() : m_event(0) {}
+	ComputeEvent(cl_event event) : m_event(event) {}
+	ComputeEvent(const ComputeEvent& o) : m_event(o.m_event) { if(m_event) clRetainEvent(m_event); }
+	ComputeEvent(ComputeEvent&& o) : m_event(o.m_event) { o.m_event = 0; }
+	ComputeEvent& operator=(const ComputeEvent& o) { 
+		if(this != &o)  {
+			if(m_event) clReleaseEvent(m_event);
+			m_event = o.m_event;
+			if(m_event) clRetainEvent(m_event);
+		}
+		return *this;
+	}
+	~ComputeEvent() { if(m_event) clReleaseEvent(m_event); }
+
+	cl_event m_event;
+};
+
+////////////////////////////////////////////////////////////////////////////////
 class ComputeKernel
 {
 public:
 	ComputeKernel(cl_program prg, const char* kernelName);
 	~ComputeKernel();
+
+	void SetArg(int index, const ComputeBuffer* buffer) const;
+	void SetArg(int index, const ComputeImage* image) const;
+	void SetArg(int index, size_t arg_size, const void* value) const;
+
+	void Enqueue(cl_uint dims, const size_t* globalWorkSize) const;
+	ComputeEvent EnqueueEv(cl_uint dims, const size_t* globalWorkSize) const;
 private:
 	cl_kernel m_kernel;
 };
@@ -37,6 +67,7 @@ private:
 ////////////////////////////////////////////////////////////////////////////////
 class ComputeBuffer
 {
+	friend class ComputeKernel;
 public:
 	ComputeBuffer(cl_context ctx, cl_mem_flags flags, size_t size, void* ptr);
 	~ComputeBuffer();
@@ -47,6 +78,7 @@ private:
 ////////////////////////////////////////////////////////////////////////////////
 class ComputeImage
 {
+	friend class ComputeKernel;
 public:
 	//ComputeImage(cl_context ctx, cl_mem_flags flags, const cl_image_format* image_format,
 	//	const cl_image_desc *image_desc, void* ptr);
@@ -55,6 +87,9 @@ public:
 			size_t pitch, void* ptr);
 	ComputeImage(cl_context ctx, cl_mem_flags flags, GLenum target, GLuint texture);
 	~ComputeImage();
+
+	void EnqueueRead(const size_t origin[3], const size_t region[3], void* ptr);
+	ComputeEvent EnqueueReadEv(const size_t origin[3], const size_t region[3], void* ptr);
 private:
 	cl_mem m_mem;
 };
@@ -97,10 +132,12 @@ std::vector<ComputePlatform> compute_GetPlatforms();
 std::shared_ptr<ComputeProgram> compute_CompileProgram(const char* filename);
 
 // buffer creation functions
-std::shared_ptr<ComputeBuffer> compute_CreateReadOnlyBuffer(size_t size, void* hostData);
-std::shared_ptr<ComputeBuffer> compute_CreateWriteOnlyBuffer(size_t size);
+std::shared_ptr<ComputeBuffer> compute_CreateBufferRO(size_t size, void* hostData);
+std::shared_ptr<ComputeBuffer> compute_CreateBufferWO(size_t size);
 
-std::shared_ptr<ComputeImage> compute_CreateWriteOnlyImage2D(size_t width, size_t height, 
+std::shared_ptr<ComputeImage> compute_CreateImage2DWO(size_t width, size_t height, 
 	cl_channel_order ord, cl_channel_type type);
-std::shared_ptr<ComputeImage> compute_CreateWriteOnlyImageFromGL(GLenum target, GLuint tex);
+std::shared_ptr<ComputeImage> compute_CreateImageFromGLWO(GLenum target, GLuint tex);
+void compute_EnqueueWaitForEvent(const ComputeEvent& event);
+void compute_Finish();
 

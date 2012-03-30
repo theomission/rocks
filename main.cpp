@@ -83,6 +83,7 @@ static Limits<float> g_recordTimeRange;
 std::string g_defaultComputeDevice;
 
 // demo specific stuff:
+static GLuint g_rockTexture;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Shaders
@@ -327,6 +328,29 @@ static void generateRockTexture()
 	auto rockKernel = rockProgram->CreateKernel("generateRockTexture");
 	if(!rockKernel)
 		return;
+
+	constexpr int kTextureDim = 512;
+
+	auto imageObj = compute_CreateImage2DWO(kTextureDim, kTextureDim,
+		CL_RGBA, CL_UNORM_INT8);
+	rockKernel->SetArg(0, imageObj.get());
+
+	auto event = rockKernel->EnqueueEv(2, (const size_t[]){kTextureDim, kTextureDim});
+	std::vector<unsigned char> hostImageData(kTextureDim * kTextureDim * 4);
+	compute_EnqueueWaitForEvent(event);
+	imageObj->EnqueueRead(
+		(const size_t[]){0,0,0}, 
+		(const size_t[]){kTextureDim, kTextureDim, 1},
+		&hostImageData[0]);
+	compute_Finish();	
+
+	// copy to the texture
+	if(!g_rockTexture)
+		glGenTextures(1, &g_rockTexture);
+	std::cout << "rock = " << g_rockTexture << std::endl;
+	glBindTexture(GL_TEXTURE_2D, g_rockTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kTextureDim, kTextureDim, 0, GL_RGBA, GL_UNSIGNED_BYTE, &hostImageData[0]);
+	glGenerateMipmap(GL_TEXTURE_2D);
 }
 
 ////////////////////////////////////////////////////////////////////////////////	

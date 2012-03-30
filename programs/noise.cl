@@ -70,7 +70,9 @@ int Fold3(int3 pt)
 
 float3 Grad(int perm)
 {
-	return g_grad[perm & GRAD_MASK];
+	float3 grad = g_grad[perm & GRAD_MASK];
+	float scale = 1.0 / sqrt(dot(grad,grad));
+	return grad * scale;
 }
 
 float3 spline_c2(float3 t)
@@ -84,29 +86,29 @@ float3 spline_c2(float3 t)
 
 float ClassicNoise3(float3 pt)
 {
-	float3 ptLo = floor(pt);
+	float3 ptLo;
+	float3 pos = fract(pt, &ptLo);
 	int3 iptLo = convert_int3(ptLo) % TABLE_SIZE;
 	int3 iptHi = iptLo + (int3)(1,1,1);
 
-	float3 pos = (pt - ptLo);
-	float3 npos = (float3)(1,1,1) - pos;
+	float3 npos = pos - (float3)(1);
 
 	int pt000 = Fold3(iptLo);
-	int pt100 = Fold3((int3)(iptHi.x, iptLo.yz));
+	int pt100 = Fold3((int3)(iptHi.x, iptLo.y, iptLo.z));
 	int pt010 = Fold3((int3)(iptLo.x, iptHi.y, iptLo.z));
-	int pt110 = Fold3((int3)(iptHi.xy, iptLo.z));
-	int pt001 = Fold3((int3)(iptLo.xy, iptHi.z));
+	int pt110 = Fold3((int3)(iptHi.x, iptHi.y, iptLo.z));
+	int pt001 = Fold3((int3)(iptLo.x, iptLo.y, iptHi.z));
 	int pt101 = Fold3((int3)(iptHi.x, iptLo.y, iptHi.z));
-	int pt011 = Fold3((int3)(iptLo.x, iptHi.yz));
+	int pt011 = Fold3((int3)(iptLo.x, iptHi.y, iptHi.z));
 	int pt111 = Fold3(iptHi.xyz);
 
 	float3 n000 = pos;
-	float3 n100 = (float3)(npos.x, pos.yz);
+	float3 n100 = (float3)(npos.x, pos.y, pos.z);
 	float3 n010 = (float3)(pos.x, npos.y, pos.z);
-	float3 n110 = (float3)(npos.xy, pos.z);
-	float3 n001 = (float3)(pos.xy, npos.z);
+	float3 n110 = (float3)(npos.x, npos.y, pos.z);
+	float3 n001 = (float3)(pos.x, pos.y, npos.z);
 	float3 n101 = (float3)(npos.x, pos.y, npos.z);
-	float3 n011 = (float3)(pos.x, npos.yz);
+	float3 n011 = (float3)(pos.x, npos.y, npos.z);
 	float3 n111 = npos.xyz;
 
 	float g000 = dot(n000, Grad(pt000));
@@ -130,6 +132,24 @@ float ClassicNoise3(float3 pt)
 
 	float dotz = mix(doty0, doty1, coords.z);
 	return dotz;
+}
+
+float fbmNoise3(float3 pt, float h, float lacunarity, float octaves)
+{
+	int numOctaves = convert_int(octaves);
+	float result = 0;
+	for(int i = 0; i < numOctaves; ++i)
+	{
+		result += ClassicNoise3(pt) * pow(lacunarity, -h * i);
+		pt *= lacunarity;
+	}
+
+	float remainder = octaves - numOctaves;
+	if(remainder > 0)
+	{
+		result += remainder * ClassicNoise3(pt) * pow(lacunarity, -h * numOctaves);
+	}
+	return result;
 }
 
 #endif

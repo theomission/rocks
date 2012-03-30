@@ -10,7 +10,7 @@
 class ComputeContext
 {
 public:
-	ComputeContext(cl_device_id device);
+	ComputeContext(cl_device_id device, bool shareGl);
 	~ComputeContext();
 	std::string GetDeviceName() const ;
 
@@ -30,14 +30,24 @@ void ComputeContext::OnError(const char* errinfo,
 	std::cerr << "OpenCL error: " << errinfo << std::endl;
 }
 	
-ComputeContext::ComputeContext(cl_device_id device)
+ComputeContext::ComputeContext(cl_device_id device, bool shareGl)
 	: m_valid(false)
 	, m_device(device)
 	, m_context(0)
 	, m_queue(0)
 {
 	cl_int ret;
-	m_context = clCreateContext(0, 1, &device, OnError, nullptr, &ret);
+	if(shareGl) { 
+		std::cerr << "opengl sharing not really implemented yet." << std::endl;
+	};
+	//const cl_context_properties properties[] = {
+	//	CL_GLX_DISPLAY_KHR,
+	//	0,		// attribute list
+
+	//	0			// term
+	//};
+	m_context = clCreateContext(nullptr, 1, &device, OnError, nullptr, &ret);
+
 	compute_CheckError(ret, "clCreateContext");
 	if(!m_context) return;
 	m_queue = clCreateCommandQueue(m_context, m_device, 0, &ret);
@@ -213,7 +223,7 @@ std::shared_ptr<SubmenuMenuItem> compute_CreateDeviceMenu()
 static void compute_SetCurrentDevice(cl_device_id id)
 {
 	g_context.reset();
-	g_context = std::make_shared<ComputeContext>(id);
+	g_context = std::make_shared<ComputeContext>(id, false);
 	if(!g_context->m_valid)
 		g_context.reset();
 }
@@ -394,6 +404,64 @@ ComputeKernel::~ComputeKernel()
 	if(m_kernel)
 		clReleaseKernel(m_kernel);
 }
+	
+void ComputeKernel::SetArg(int index, const ComputeBuffer* buffer) const
+{
+	cl_int ret = clSetKernelArg(m_kernel, index, sizeof(buffer->m_mem), &buffer->m_mem);
+	compute_CheckError(ret, "clSetKernelArg");
+}
+
+void ComputeKernel::SetArg(int index, const ComputeImage* image) const
+{
+	cl_int ret = clSetKernelArg(m_kernel, index, sizeof(image->m_mem), &image->m_mem);
+	compute_CheckError(ret, "clSetKernelArg");
+}
+
+void ComputeKernel::SetArg(int index, size_t arg_size, const void* value) const
+{
+	cl_int ret = clSetKernelArg(m_kernel, index, arg_size, value);
+	compute_CheckError(ret, "clSetKernelArg");
+}
+	
+void ComputeKernel::Enqueue(cl_uint dims, const size_t* globalWorkSize) const
+{
+	if(!m_kernel)
+	{
+		std::cerr << "invalid kernel" << std::endl;
+		return;
+	}
+	cl_int ret = clEnqueueNDRangeKernel(g_context->m_queue,
+		m_kernel,
+		dims,
+		nullptr,
+		globalWorkSize,
+		nullptr,
+		0,
+		nullptr,
+		nullptr);
+	compute_CheckError(ret, "clEnqueueNDRangeKernel");
+}
+
+ComputeEvent ComputeKernel::EnqueueEv(cl_uint dims, const size_t* globalWorkSize) const
+{
+	if(!m_kernel)
+	{
+		std::cerr << "invalid kernel" << std::endl;
+		return 0;
+	}
+	cl_event event;
+	cl_int ret = clEnqueueNDRangeKernel(g_context->m_queue,
+		m_kernel,
+		dims,
+		nullptr,
+		globalWorkSize,
+		nullptr,
+		0,
+		nullptr,
+		&event);
+	compute_CheckError(ret, "clEnqueueNDRangeKernel");
+	return event;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 ComputeBuffer::ComputeBuffer(cl_context ctx, cl_mem_flags flags, size_t size, void* ptr)
@@ -444,23 +512,61 @@ ComputeImage::~ComputeImage()
 {
 	if(m_mem) clReleaseMemObject(m_mem);
 }
+	
+void ComputeImage::EnqueueRead(const size_t origin[3], const size_t region[3], void* ptr)
+{
+	if(!m_mem) {
+		std::cerr << "Invalid image" << std::endl;
+		return;
+	}
+	cl_int ret = clEnqueueReadImage(g_context->m_queue, 
+		m_mem,
+		CL_FALSE,
+		origin,
+		region,
+		0, 0,
+		ptr,
+		0, nullptr,
+		nullptr);
+	compute_CheckError(ret, "clEnqueueReadImage");
+}
+
+ComputeEvent ComputeImage::EnqueueReadEv(const size_t origin[3], const size_t region[3], void* ptr)
+{
+	if(!m_mem) {
+		std::cerr << "Invalid image" << std::endl;
+		return 0;
+	}
+	cl_event event;
+	cl_int ret = clEnqueueReadImage(g_context->m_queue, 
+		m_mem,
+		CL_FALSE,
+		origin,
+		region,
+		0, 0,
+		ptr,
+		0, nullptr,
+		&event);
+	compute_CheckError(ret, "clEnqueueReadImage");
+	return event;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
-std::shared_ptr<ComputeBuffer> compute_CreateReadOnlyBuffer(size_t size, void* hostData)
+std::shared_ptr<ComputeBuffer> compute_CreateBufferRO(size_t size, void* hostData)
 {
 	if(!g_context) return nullptr;
 	return std::make_shared<ComputeBuffer>(g_context->m_context, 
 		CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, size, hostData);
 }
 
-std::shared_ptr<ComputeBuffer> compute_CreateWriteOnlyBuffer(size_t size) 
+std::shared_ptr<ComputeBuffer> compute_CreateBufferWO(size_t size) 
 {
 	if(!g_context) return nullptr;
 	return std::make_shared<ComputeBuffer>(g_context->m_context, 
 		CL_MEM_WRITE_ONLY, size, nullptr);
 }
 
-std::shared_ptr<ComputeImage> compute_CreateWriteOnlyImage2D(size_t width, size_t height, 
+std::shared_ptr<ComputeImage> compute_CreateImage2DWO(size_t width, size_t height, 
 	cl_channel_order ord, cl_channel_type type)
 {
 	if(!g_context) return nullptr;
@@ -474,10 +580,24 @@ std::shared_ptr<ComputeImage> compute_CreateWriteOnlyImage2D(size_t width, size_
 		nullptr);
 }
 
-std::shared_ptr<ComputeImage> compute_CreateWriteOnlyImageFromGL(GLenum target, GLuint tex)
+std::shared_ptr<ComputeImage> compute_CreateImageFromGLWO(GLenum target, GLuint tex)
 {
 	if(!g_context) return nullptr;
 	return std::make_shared<ComputeImage>(g_context->m_context, CL_MEM_WRITE_ONLY,
 		target, tex);
+}
+
+void compute_EnqueueWaitForEvent(const ComputeEvent& event)
+{
+	if(event.m_event)
+		clWaitForEvents(1, (const cl_event[]){event.m_event});
+	else 
+		std::cerr << "waiting for null event!" << std::endl;
+}
+
+void compute_Finish()
+{
+	if(!g_context) return ;
+	clFinish(g_context->m_queue);
 }
 
