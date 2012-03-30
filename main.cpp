@@ -27,6 +27,44 @@
 #include "compute.hh"
 
 ////////////////////////////////////////////////////////////////////////////////
+// types
+class RockTextureParams
+{
+public:
+	RockTextureParams() 
+		: m_marbleDepth(4)
+		, m_marbleTurb(2.5)
+		, m_baseColor0(122/255.0, 138/255.0, 162/255.0)
+		, m_baseColor1(38/255.0, 58/255.0, 85/255.0)
+		, m_baseColor2(136/255.0, 87/255.0, 9/255.0)
+		, m_darkColor(0.f)
+		, m_scale(7)
+		, m_noiseScaleColor(7.0)
+		, m_noiseScaleHeight(6.0)
+		, m_noiseScalePt(3.f)
+		, m_lacunarity(0.7f)
+		, m_H(1.9f)
+		, m_octaves(5)
+		, m_offset(2.f)
+	{}
+
+	int m_marbleDepth;
+	float m_marbleTurb;
+	Color m_baseColor0;
+	Color m_baseColor1;
+	Color m_baseColor2;
+	Color m_darkColor;
+	float m_scale;
+	float m_noiseScaleColor;
+	float m_noiseScaleHeight;
+	float m_noiseScalePt;
+	float m_lacunarity;
+	float m_H;
+	int m_octaves;
+	float m_offset;
+
+};
+////////////////////////////////////////////////////////////////////////////////
 // file scope globals
 
 // cameras
@@ -83,17 +121,34 @@ static Limits<float> g_recordTimeRange;
 std::string g_defaultComputeDevice;
 
 // demo specific stuff:
+static constexpr int kRockTextureDim = 1024;
 static GLuint g_rockTexture;
+static GLuint g_rockHeightTexture;
+static std::shared_ptr<Geom> g_rockGeom;
+static RockTextureParams m_rockParams;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Shaders
 
-// TODO
+enum RockUniformLocType {
+	ROCKBIND_DiffuseMap,
+	ROCKBIND_HeightMap,
+	ROCKBIND_TexDim,
+};
+
+static const std::vector<CustomShaderAttr> g_rockShaderUniforms = {
+	{ ROCKBIND_DiffuseMap, "diffuseMap" },
+	{ ROCKBIND_HeightMap, "heightMap" },
+	{ ROCKBIND_TexDim, "texDim" },
+};
+
+static std::shared_ptr<ShaderInfo> g_rockShader ;
 
 ////////////////////////////////////////////////////////////////////////////////
 // forward decls
 static void record_Start();
 static void generateRockTexture();
+static void generateRockGeom();
 
 ////////////////////////////////////////////////////////////////////////////////
 // tweak vars - these are checked into git
@@ -108,6 +163,20 @@ static std::vector<std::shared_ptr<TweakVarBase>> g_tweakVars = {
 	std::make_shared<TweakFloat>("cam.orbitLength", &g_orbitLength, 1000.f),
 	std::make_shared<TweakVector>("lighting.sundir", &g_sundir, vec3(0,0,1)),
 	std::make_shared<TweakColor>("lighting.suncolor", &g_sunColor, Color(1,1,1)),
+	std::make_shared<TweakInt>("rocktexture.marbleDepth", &m_rockParams.m_marbleDepth, 4),
+	std::make_shared<TweakFloat>("rocktexture.marbleTurb", &m_rockParams.m_marbleTurb, 2.5),
+	std::make_shared<TweakColor>("rocktexture.baseColor0", &m_rockParams.m_baseColor0, Color(122/255.0, 138/255.0, 162/255.0)),
+	std::make_shared<TweakColor>("rocktexture.baseColor1", &m_rockParams.m_baseColor1, Color(38/255.0, 58/255.0, 85/255.0)),
+	std::make_shared<TweakColor>("rocktexture.baseColor2", &m_rockParams.m_baseColor2, Color(136/255.0, 87/255.0, 9/255.0)),
+	std::make_shared<TweakColor>("rocktexture.darkColor", &m_rockParams.m_darkColor, Color(0.f)),
+	std::make_shared<TweakFloat>("rocktexture.scale", &m_rockParams.m_scale, 7.f),
+	std::make_shared<TweakFloat>("rocktexture.noiseScaleColor", &m_rockParams.m_noiseScaleColor, 7.f),
+	std::make_shared<TweakFloat>("rocktexture.noiseScaleHeight", &m_rockParams.m_noiseScaleHeight, 6.f),
+	std::make_shared<TweakFloat>("rocktexture.noiseScalePt", &m_rockParams.m_noiseScalePt, 3.f),
+	std::make_shared<TweakFloat>("rocktexture.lacunarity", &m_rockParams.m_lacunarity, 0.7),
+	std::make_shared<TweakFloat>("rocktexture.H", &m_rockParams.m_H, 2.0),
+	std::make_shared<TweakInt>("rocktexture.octaves", &m_rockParams.m_octaves, 5),
+	std::make_shared<TweakFloat>("rocktexture.offset", &m_rockParams.m_offset, 2),
 };
 
 static void SaveCurrentCamera()
@@ -190,6 +259,20 @@ static std::shared_ptr<TopMenuItem> MakeMenu()
 	};
 	std::vector<std::shared_ptr<MenuItem>> textureMenu = {
 		std::make_shared<ButtonMenuItem>("regenerate", [](){ generateRockTexture(); }),
+		std::make_shared<IntSliderMenuItem>("marbleDepth", &m_rockParams.m_marbleDepth),
+		std::make_shared<FloatSliderMenuItem>("marbleTurb", &m_rockParams.m_marbleTurb, 0.1f),
+		std::make_shared<ColorSliderMenuItem>("baseColor0", &m_rockParams.m_baseColor0),
+		std::make_shared<ColorSliderMenuItem>("baseColor1", &m_rockParams.m_baseColor1),
+		std::make_shared<ColorSliderMenuItem>("baseColor2", &m_rockParams.m_baseColor2),
+		std::make_shared<ColorSliderMenuItem>("darkColor", &m_rockParams.m_darkColor),
+		std::make_shared<FloatSliderMenuItem>("scale", &m_rockParams.m_scale, 1.f),
+		std::make_shared<FloatSliderMenuItem>("noiseScaleColor", &m_rockParams.m_noiseScaleColor, 1.f),
+		std::make_shared<FloatSliderMenuItem>("noiseScaleHeight", &m_rockParams.m_noiseScaleHeight, 1.f),
+		std::make_shared<FloatSliderMenuItem>("noiseScalePt", &m_rockParams.m_noiseScalePt, 1.f),
+		std::make_shared<FloatSliderMenuItem>("lacunarity", &m_rockParams.m_lacunarity, 0.1f),
+		std::make_shared<FloatSliderMenuItem>("H", &m_rockParams.m_H, 0.1f),
+		std::make_shared<IntSliderMenuItem>("octaves", &m_rockParams.m_octaves),
+		std::make_shared<FloatSliderMenuItem>("offset", &m_rockParams.m_offset, 1.f),
 	};
 	std::vector<std::shared_ptr<MenuItem>> tweakMenu = {
 		std::make_shared<SubmenuMenuItem>("cam", std::move(cameraMenu)),
@@ -247,6 +330,43 @@ static void record_Advance()
 	std::cout << "done." << std::endl;
 }
 
+static void drawRockGeom(const vec3& sundir, const mat4& matProjView)
+{
+	mat4 model = MakeScale(vec3(100.0f));
+	mat4 modelIT = TransposeOfInverse(model);
+	mat4 mvp = matProjView * model;
+
+	const ShaderInfo* shader = g_rockShader.get();
+	glUseProgram(shader->m_program);
+
+	GLint mvpLoc = shader->m_uniforms[BIND_Mvp];
+	GLint modelLoc = shader->m_uniforms[BIND_Model];
+	GLint modelITLoc = shader->m_uniforms[BIND_ModelIT];
+	GLint eyePosLoc = shader->m_uniforms[BIND_Eyepos];
+	GLint sundirLoc = shader->m_uniforms[BIND_Sundir];
+	GLint sunColorLoc = shader->m_uniforms[BIND_SunColor];
+	GLint diffuseMapLoc = shader->m_custom[ROCKBIND_DiffuseMap];
+	GLint heightMapLoc = shader->m_custom[ROCKBIND_HeightMap];
+	GLint texDimLoc = shader->m_custom[ROCKBIND_TexDim];
+
+	glUniformMatrix4fv(mvpLoc, 1, 0, mvp.m);
+	glUniformMatrix4fv(modelLoc, 1, 0, model.m);
+	glUniformMatrix4fv(modelITLoc, 1, 0, modelIT.m);
+	glUniform3fv(sundirLoc, 1, &sundir.x);
+	glUniform3fv(sunColorLoc, 1, &g_sunColor.r);
+	glUniform3fv(eyePosLoc, 1, &g_curCamera->GetPos().x);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, g_rockTexture);
+	glUniform1i(diffuseMapLoc, 0);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, g_rockHeightTexture);
+	glUniform1i(heightMapLoc, 1);
+	constexpr float invTexDim = 1.0 / kRockTextureDim;
+	glUniform2f(texDimLoc, invTexDim, invTexDim);
+
+	g_rockGeom->Render(*shader);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 static void draw(Framedata& frame)
 {
@@ -264,14 +384,17 @@ static void draw(Framedata& frame)
 	if(g_wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	else glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-	//vec3 normalizedSundir = Normalize(g_sundir);
+	vec3 normalizedSundir = Normalize(g_sundir);
 
 	////////////////////////////////////////////////////////////////////////////////
 	if(!camera_GetDebugCamera()) glEnable(GL_SCISSOR_TEST);
 	glEnable(GL_DEPTH_TEST);
 
-	// TODO render here
-
+	mat4 matProjView = g_curCamera->GetProj() * g_curCamera->GetView();
+	
+	// render rock geom
+	drawRockGeom(normalizedSundir, matProjView);
+	
 	// everything below here is feedback for the user, so record the frame if we're recording
 	if(g_recording)
 	{
@@ -329,28 +452,62 @@ static void generateRockTexture()
 	if(!rockKernel)
 		return;
 
-	constexpr int kTextureDim = 512;
-
-	auto imageObj = compute_CreateImage2DWO(kTextureDim, kTextureDim,
+	auto imageObj = compute_CreateImage2DWO(kRockTextureDim, kRockTextureDim,
 		CL_RGBA, CL_UNORM_INT8);
+	auto heightObj = compute_CreateImage2DWO(kRockTextureDim, kRockTextureDim,
+		CL_R, CL_UNORM_INT8);
 	rockKernel->SetArg(0, imageObj.get());
+	rockKernel->SetArg(1, heightObj.get());
+	rockKernel->SetArg(2, &m_rockParams.m_marbleDepth);
+	rockKernel->SetArg(3, &m_rockParams.m_marbleTurb);
+	rockKernel->SetArg(4, &m_rockParams.m_baseColor0);
+	rockKernel->SetArg(5, &m_rockParams.m_baseColor1);
+	rockKernel->SetArg(6, &m_rockParams.m_baseColor2);
+	rockKernel->SetArg(7, &m_rockParams.m_darkColor);
+	rockKernel->SetArg(8, &m_rockParams.m_scale);
+	rockKernel->SetArg(9, &m_rockParams.m_noiseScaleColor);
+	rockKernel->SetArg(10, &m_rockParams.m_noiseScaleHeight);
+	rockKernel->SetArg(11, &m_rockParams.m_noiseScalePt);
+	rockKernel->SetArg(12, &m_rockParams.m_lacunarity);
+	rockKernel->SetArg(13, &m_rockParams.m_H);
+	rockKernel->SetArg(14, &m_rockParams.m_octaves);
+	rockKernel->SetArg(15, &m_rockParams.m_offset);
 
-	auto event = rockKernel->EnqueueEv(2, (const size_t[]){kTextureDim, kTextureDim});
-	std::vector<unsigned char> hostImageData(kTextureDim * kTextureDim * 4);
+	auto event = rockKernel->EnqueueEv(2, (const size_t[]){kRockTextureDim, kRockTextureDim});
+
+	std::vector<unsigned char> hostImageData(kRockTextureDim * kRockTextureDim * 4);
+	std::vector<unsigned char> hostHeightData(kRockTextureDim * kRockTextureDim);
 	compute_EnqueueWaitForEvent(event);
 	imageObj->EnqueueRead(
 		(const size_t[]){0,0,0}, 
-		(const size_t[]){kTextureDim, kTextureDim, 1},
+		(const size_t[]){kRockTextureDim, kRockTextureDim, 1},
 		&hostImageData[0]);
+	heightObj->EnqueueRead(
+		(const size_t[]){0,0,0}, 
+		(const size_t[]){kRockTextureDim, kRockTextureDim, 1},
+		&hostHeightData[0]);
 	compute_Finish();	
 
 	// copy to the texture
 	if(!g_rockTexture)
 		glGenTextures(1, &g_rockTexture);
-	std::cout << "rock = " << g_rockTexture << std::endl;
+	if(!g_rockHeightTexture)
+		glGenTextures(1, &g_rockHeightTexture);
+
 	glBindTexture(GL_TEXTURE_2D, g_rockTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kTextureDim, kTextureDim, 0, GL_RGBA, GL_UNSIGNED_BYTE, &hostImageData[0]);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kRockTextureDim, kRockTextureDim, 0, GL_RGBA, GL_UNSIGNED_BYTE, &hostImageData[0]);
 	glGenerateMipmap(GL_TEXTURE_2D);
+	
+	glBindTexture(GL_TEXTURE_2D, g_rockHeightTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, kRockTextureDim, kRockTextureDim, 0, GL_RED, GL_UNSIGNED_BYTE, &hostHeightData[0]);
+	glGenerateMipmap(GL_TEXTURE_2D);
+}
+
+static void generateRockGeom()
+{
+	// replace with something cooler
+	g_rockGeom = render_GenerateSphereGeom(100,100);
+	g_rockShader = render_CompileShader("shaders/rock.glsl", g_rockShaderUniforms);
 }
 
 ////////////////////////////////////////////////////////////////////////////////	
@@ -369,6 +526,7 @@ static void initialize()
 	compute_Init(g_defaultComputeDevice.c_str());
 	g_defaultComputeDevice = compute_GetCurrentDeviceName();
 	generateRockTexture();
+	generateRockGeom();
 
 	g_mainCamera = std::make_shared<Camera>(30.f, g_screen.m_aspect);
 	g_debugCamera = std::make_shared<Camera>(30.f, g_screen.m_aspect);

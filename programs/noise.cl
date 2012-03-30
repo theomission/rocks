@@ -152,5 +152,40 @@ float fbmNoise3(float3 pt, float h, float lacunarity, float octaves)
 	return result;
 }
 
+float multifractal(float3 pt, float h, float lacunarity, int numOctaves, float offset)
+{
+	float result = 1;
+	for(int i = 0; i < numOctaves; ++i)
+	{
+		result *= (ClassicNoise3(pt) + offset) * pow(lacunarity, -h * i);
+		pt *= lacunarity;
+	}
+
+	return result;
+	
+}
+
+float turbulence(float3 pt, int depth)
+{
+	float result = 0;
+	float scale = 1.0;
+	for(int i = 0; i < depth; ++i)
+	{
+		pt /= scale;
+		result += (0.5 * ClassicNoise3(pt) + 0.5) * scale;
+		scale *= 0.5;
+	}
+	return result;
+}
+
+float marble(float3 npt, float turbulenceMult, float power, float depth)
+{
+	float val= npt.y + npt.x + turbulenceMult * turbulence(npt, depth);
+	val = 0.5 * sin(M_PI * val) + 0.5;
+	val = 1.0 - pow(val,power);
+	return val;
+}
+
+
 #endif
 

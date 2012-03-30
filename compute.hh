@@ -57,6 +57,10 @@ public:
 	void SetArg(int index, const ComputeBuffer* buffer) const;
 	void SetArg(int index, const ComputeImage* image) const;
 	void SetArg(int index, size_t arg_size, const void* value) const;
+	template<class T>
+		void SetArg(int index, const T* val) const {
+			SetArg(index, sizeof(T), val);
+		}
 
 	void Enqueue(cl_uint dims, const size_t* globalWorkSize) const;
 	ComputeEvent EnqueueEv(cl_uint dims, const size_t* globalWorkSize) const;
