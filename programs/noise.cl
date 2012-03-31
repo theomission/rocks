@@ -71,7 +71,7 @@ int Fold3(int3 pt)
 float3 Grad(int perm)
 {
 	float3 grad = g_grad[perm & GRAD_MASK];
-	float scale = 1.0 / sqrt(dot(grad,grad));
+	float scale = rsqrt(dot(grad,grad));
 	return grad * scale;
 }
 

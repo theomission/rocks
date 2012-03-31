@@ -24,7 +24,7 @@ __kernel void generateRockTexture(
 	int2 coords = (int2)(get_global_id(0), get_global_id(1));
 	int2 dims = (int2)(get_global_size(0), get_global_size(1));
 
-	float2 fcoords = convert_float2(coords) / convert_float2(dims);
+	float2 fcoords = convert_float2(coords) / convert_float2(dims - (int2)(1));
 	fcoords.y = 1 - fcoords.y;
 
 	float3 npt = (float3)(fcoords.xy, 0);
@@ -53,5 +53,29 @@ __kernel void generateRockTexture(
 	
 	write_imagef(outputImage, coords, color);
 	write_imagef(heightImage, coords, height);
+}
+
+__kernel void generateRockDensity(
+	__write_only __global unsigned char *outDensity,
+	float radius,
+	float3 noiseScale,
+	float H,
+	float lacunarity,
+	float octaves
+	)
+{
+	int3 coords = (int3)(get_global_id(0), get_global_id(1), get_global_id(2));
+	int3 dims = (int3)(get_global_size(0), get_global_size(1), get_global_size(2));
+	
+	float3 fcoords = convert_float3(coords) / convert_float3(dims - (int3)(1));
+	const float3 center = (float3)(0.5,0.5,0.5);
+	float3 diff = fcoords - center;
+	float len = length(diff);
+
+	len += fbmNoise3(fcoords * noiseScale, H, lacunarity, octaves);
+
+	int index = coords.x + coords.y * dims.y + coords.z * (dims.y * dims.x);
+	float density = smoothstep(0, 0.1, radius - len);
+	outDensity[index] = clamp(density, 0.0f, 1.0f) * 255;
 }
 

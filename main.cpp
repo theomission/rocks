@@ -126,6 +126,7 @@ static GLuint g_rockTexture;
 static GLuint g_rockHeightTexture;
 static std::shared_ptr<Geom> g_rockGeom;
 static RockTextureParams m_rockParams;
+static std::shared_ptr<ComputeProgram> g_rockGenProgram;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Shaders
@@ -273,12 +274,17 @@ static std::shared_ptr<TopMenuItem> MakeMenu()
 		std::make_shared<FloatSliderMenuItem>("H", &m_rockParams.m_H, 0.1f),
 		std::make_shared<IntSliderMenuItem>("octaves", &m_rockParams.m_octaves),
 		std::make_shared<FloatSliderMenuItem>("offset", &m_rockParams.m_offset, 1.f),
+		std::make_shared<ButtonMenuItem>("recompile", [](){ g_rockGenProgram->Recompile(); }),
+	};
+	std::vector<std::shared_ptr<MenuItem>> geomMenu = {
+		std::make_shared<ButtonMenuItem>("regenerate", [](){ generateRockGeom(); }),
 	};
 	std::vector<std::shared_ptr<MenuItem>> tweakMenu = {
 		std::make_shared<SubmenuMenuItem>("cam", std::move(cameraMenu)),
 		std::make_shared<SubmenuMenuItem>("lighting", std::move(lightingMenu)),
-		std::make_shared<SubmenuMenuItem>("debug", std::move(debugMenu)),
 		std::make_shared<SubmenuMenuItem>("texture", std::move(textureMenu)),
+		std::make_shared<SubmenuMenuItem>("geom", std::move(geomMenu)),
+		std::make_shared<SubmenuMenuItem>("debug", std::move(debugMenu)),
 	};
 	std::vector<std::shared_ptr<MenuItem>> recordMenu = {
 		std::make_shared<ButtonMenuItem>("take screenshot", [](){ g_screenshotRequested = true; }),
@@ -445,10 +451,7 @@ static void draw(Framedata& frame)
 ////////////////////////////////////////////////////////////////////////////////	
 static void generateRockTexture()
 {
-	auto rockProgram = compute_CompileProgram("programs/rock.cl");
-	if(!rockProgram) 
-		return;
-	auto rockKernel = rockProgram->CreateKernel("generateRockTexture");
+	auto rockKernel = g_rockGenProgram->CreateKernel("generateRockTexture");
 	if(!rockKernel)
 		return;
 
@@ -505,9 +508,49 @@ static void generateRockTexture()
 
 static void generateRockGeom()
 {
-	// replace with something cooler
+	auto densityKernel = g_rockGenProgram->CreateKernel("generateRockDensity");
+	if(!densityKernel)
+		return;
+	
+	constexpr int kDensityDim = 256;
+	constexpr int densityBufferSliceSize = kDensityDim * kDensityDim ;
+	auto densityBufferA = compute_CreateBufferWO(densityBufferSliceSize);
+	auto densityBufferB = compute_CreateBufferWO(densityBufferSliceSize);
+
+	densityKernel->SetArgVal(1, 0.5f); // radius
+	densityKernel->SetArg(2, sizeof(cl_float3), (cl_float3[]){{{10.0f,10.0f,10.0f}}});
+	densityKernel->SetArgVal(3, 2.f); // H
+	densityKernel->SetArgVal(4, 0.7f); // lacunarity
+	densityKernel->SetArgVal(5, 8.8f); // octaves
+
+	std::vector<unsigned char> hostDensityBuffer(densityBufferSliceSize * kDensityDim);
+
+	int curBuffer = 0;
+	ComputeEvent lastEvent[2];
+	const ComputeBuffer* buffers[2] = { densityBufferA.get(), densityBufferB.get() };
+	for(int z = 0; z < 2; ++z)
+	{
+		densityKernel->SetArg(0, buffers[curBuffer]);
+		auto taskEv = densityKernel->EnqueueEv(3, 
+				(const size_t[]){0, 0, z},
+				(const size_t[]){kDensityDim, kDensityDim, 1},
+				(const size_t[]){16,16,1},
+				lastEvent[curBuffer].m_event ? 1 : 0, 
+				(const cl_event[]){lastEvent[curBuffer].m_event});
+		auto readEv = buffers[curBuffer]->EnqueueRead(0, densityBufferSliceSize, 
+			&hostDensityBuffer[z * densityBufferSliceSize], 
+			1, (const cl_event[]){taskEv.m_event});
+		lastEvent[curBuffer] = readEv;
+		curBuffer = curBuffer ^ 1;
+	}
+	compute_Finish();
+
+	// TODO kick marching tetrahedrons
+
+	// TODO create geom from marching tetrahedron output
+
+	// ahem.
 	g_rockGeom = render_GenerateSphereGeom(100,100);
-	g_rockShader = render_CompileShader("shaders/rock.glsl", g_rockShaderUniforms);
 }
 
 ////////////////////////////////////////////////////////////////////////////////	
@@ -525,6 +568,8 @@ static void initialize()
 	ui_Init();
 	compute_Init(g_defaultComputeDevice.c_str());
 	g_defaultComputeDevice = compute_GetCurrentDeviceName();
+	g_rockGenProgram = compute_CompileProgram("programs/rock.cl");
+	g_rockShader = render_CompileShader("shaders/rock.glsl", g_rockShaderUniforms);
 	generateRockTexture();
 	generateRockGeom();
 

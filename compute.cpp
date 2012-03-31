@@ -423,7 +423,8 @@ void ComputeKernel::SetArg(int index, size_t arg_size, const void* value) const
 	compute_CheckError(ret, "clSetKernelArg");
 }
 	
-void ComputeKernel::Enqueue(cl_uint dims, const size_t* globalWorkSize) const
+void ComputeKernel::Enqueue(cl_uint dims, const size_t* globalWorkSize, const size_t* localWorkSize,
+	cl_uint numEvents, const cl_event* events) const
 {
 	if(!m_kernel)
 	{
@@ -435,33 +436,83 @@ void ComputeKernel::Enqueue(cl_uint dims, const size_t* globalWorkSize) const
 		dims,
 		nullptr,
 		globalWorkSize,
-		nullptr,
-		0,
-		nullptr,
+		localWorkSize,
+		numEvents,
+		events,
 		nullptr);
 	compute_CheckError(ret, "clEnqueueNDRangeKernel");
 }
 
-ComputeEvent ComputeKernel::EnqueueEv(cl_uint dims, const size_t* globalWorkSize) const
+ComputeEvent ComputeKernel::EnqueueEv(cl_uint dims, const size_t* globalWorkSize, const size_t *localWorkSize,
+	cl_uint numEvents, const cl_event* events) const
 {
 	if(!m_kernel)
 	{
 		std::cerr << "invalid kernel" << std::endl;
 		return 0;
 	}
-	cl_event event;
+	cl_event event = {};
 	cl_int ret = clEnqueueNDRangeKernel(g_context->m_queue,
 		m_kernel,
 		dims,
 		nullptr,
 		globalWorkSize,
-		nullptr,
-		0,
-		nullptr,
+		localWorkSize,
+		numEvents,
+		events,
 		&event);
 	compute_CheckError(ret, "clEnqueueNDRangeKernel");
 	return event;
 }
+
+void ComputeKernel::Enqueue(cl_uint dims, 
+	const size_t* globalWorkOffset,
+	const size_t* globalWorkSize,
+	const size_t* localWorkSize,
+	cl_uint numEvents, const cl_event* events) const
+{
+	if(!m_kernel)
+	{
+		std::cerr << "invalid kernel" << std::endl;
+		return;
+	}
+	cl_int ret = clEnqueueNDRangeKernel(g_context->m_queue,
+		m_kernel,
+		dims,
+		globalWorkOffset,
+		globalWorkSize,
+		localWorkSize,
+		numEvents,
+		events,
+		nullptr);
+	compute_CheckError(ret, "clEnqueueNDRangeKernel");
+}
+
+ComputeEvent ComputeKernel::EnqueueEv(cl_uint dims,
+	const size_t* globalWorkOffset,
+	const size_t* globalWorkSize, 
+	const size_t *localWorkSize,
+	cl_uint numEvents, const cl_event* events) const
+{
+	if(!m_kernel)
+	{
+		std::cerr << "invalid kernel" << std::endl;
+		return 0;
+	}
+	cl_event event = {};
+	cl_int ret = clEnqueueNDRangeKernel(g_context->m_queue,
+		m_kernel,
+		dims,
+		globalWorkOffset,
+		globalWorkSize,
+		localWorkSize,
+		numEvents,
+		events,
+		&event);
+	compute_CheckError(ret, "clEnqueueNDRangeKernel");
+	return event;
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 ComputeBuffer::ComputeBuffer(cl_context ctx, cl_mem_flags flags, size_t size, void* ptr)
@@ -475,6 +526,20 @@ ComputeBuffer::ComputeBuffer(cl_context ctx, cl_mem_flags flags, size_t size, vo
 ComputeBuffer::~ComputeBuffer()
 {
 	if(m_mem) clReleaseMemObject(m_mem);
+}
+
+ComputeEvent ComputeBuffer::EnqueueRead(size_t offset, size_t cb, void* hostMem,
+	cl_uint numEvents, const cl_event* events) const
+{
+	cl_event event = {};
+	if(!m_mem) {
+		std::cerr << "EnqueueRead on invalid buffer" << std::endl;
+		return 0;
+	}
+	cl_int ret = clEnqueueReadBuffer(g_context->m_queue, m_mem, CL_FALSE,
+		offset, cb, hostMem, numEvents, events, &event);
+	compute_CheckError(ret, "clEnqueueReadBuffer");
+	return event;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -513,31 +578,13 @@ ComputeImage::~ComputeImage()
 	if(m_mem) clReleaseMemObject(m_mem);
 }
 	
-void ComputeImage::EnqueueRead(const size_t origin[3], const size_t region[3], void* ptr)
-{
-	if(!m_mem) {
-		std::cerr << "Invalid image" << std::endl;
-		return;
-	}
-	cl_int ret = clEnqueueReadImage(g_context->m_queue, 
-		m_mem,
-		CL_FALSE,
-		origin,
-		region,
-		0, 0,
-		ptr,
-		0, nullptr,
-		nullptr);
-	compute_CheckError(ret, "clEnqueueReadImage");
-}
-
-ComputeEvent ComputeImage::EnqueueReadEv(const size_t origin[3], const size_t region[3], void* ptr)
+ComputeEvent ComputeImage::EnqueueRead(const size_t origin[3], const size_t region[3], void* ptr)
 {
 	if(!m_mem) {
 		std::cerr << "Invalid image" << std::endl;
 		return 0;
 	}
-	cl_event event;
+	cl_event event = {};
 	cl_int ret = clEnqueueReadImage(g_context->m_queue, 
 		m_mem,
 		CL_FALSE,
@@ -564,6 +611,16 @@ std::shared_ptr<ComputeBuffer> compute_CreateBufferWO(size_t size)
 	if(!g_context) return nullptr;
 	return std::make_shared<ComputeBuffer>(g_context->m_context, 
 		CL_MEM_WRITE_ONLY, size, nullptr);
+}
+
+std::shared_ptr<ComputeBuffer> compute_CreateBufferRW(size_t size, void* hostData) 
+{
+	if(!g_context) return nullptr;
+	cl_mem_flags flags = CL_MEM_READ_WRITE;
+	if(hostData)
+		flags |= CL_MEM_COPY_HOST_PTR;
+	return std::make_shared<ComputeBuffer>(g_context->m_context, 
+		flags, size, hostData);
 }
 
 std::shared_ptr<ComputeImage> compute_CreateImage2DWO(size_t width, size_t height, 
@@ -593,6 +650,12 @@ void compute_EnqueueWaitForEvent(const ComputeEvent& event)
 		clWaitForEvents(1, (const cl_event[]){event.m_event});
 	else 
 		std::cerr << "waiting for null event!" << std::endl;
+}
+
+void compute_EnqueueMarker()
+{
+	cl_int ret = clEnqueueMarker(g_context->m_queue, nullptr);
+	compute_CheckError(ret, "clEnqueueMarker");
 }
 
 void compute_Finish()

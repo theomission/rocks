@@ -61,9 +61,22 @@ public:
 		void SetArg(int index, const T* val) const {
 			SetArg(index, sizeof(T), val);
 		}
+	template<class T>
+		void SetArgVal(int index, const T& val) const {
+			SetArg(index, sizeof(T), &val);
+		}
 
-	void Enqueue(cl_uint dims, const size_t* globalWorkSize) const;
-	ComputeEvent EnqueueEv(cl_uint dims, const size_t* globalWorkSize) const;
+	void Enqueue(cl_uint dims, const size_t* globalWorkSize, const size_t* localWorkSize = nullptr,
+		cl_uint numEvents = 0, const cl_event* events = nullptr) const;
+	ComputeEvent EnqueueEv(cl_uint dims, const size_t* globalWorkSize, const size_t* localWorkSize = nullptr,
+		cl_uint numEvents = 0, const cl_event* events = nullptr) const;
+
+	void Enqueue(cl_uint dims, const size_t* globalWorkOffset,
+		const size_t* globalWorkSize, const size_t* localWorkSize,
+		cl_uint numEvents = 0, const cl_event* events = nullptr) const;
+	ComputeEvent EnqueueEv(cl_uint dims, const size_t* globalWorkOffset,
+		const size_t* globalWorkSize, const size_t* localWorkSize,
+		cl_uint numEvents = 0, const cl_event* events = nullptr) const;
 private:
 	cl_kernel m_kernel;
 };
@@ -75,6 +88,9 @@ class ComputeBuffer
 public:
 	ComputeBuffer(cl_context ctx, cl_mem_flags flags, size_t size, void* ptr);
 	~ComputeBuffer();
+
+	ComputeEvent EnqueueRead(size_t offset, size_t cb, void* hostMem, 
+		cl_uint numEvents = 0, const cl_event* events = nullptr) const;
 private:
 	cl_mem m_mem;
 };
@@ -92,8 +108,7 @@ public:
 	ComputeImage(cl_context ctx, cl_mem_flags flags, GLenum target, GLuint texture);
 	~ComputeImage();
 
-	void EnqueueRead(const size_t origin[3], const size_t region[3], void* ptr);
-	ComputeEvent EnqueueReadEv(const size_t origin[3], const size_t region[3], void* ptr);
+	ComputeEvent EnqueueRead(const size_t origin[3], const size_t region[3], void* ptr);
 private:
 	cl_mem m_mem;
 };
@@ -137,11 +152,13 @@ std::shared_ptr<ComputeProgram> compute_CompileProgram(const char* filename);
 
 // buffer creation functions
 std::shared_ptr<ComputeBuffer> compute_CreateBufferRO(size_t size, void* hostData);
+std::shared_ptr<ComputeBuffer> compute_CreateBufferRW(size_t size, void* hostData = nullptr);
 std::shared_ptr<ComputeBuffer> compute_CreateBufferWO(size_t size);
 
 std::shared_ptr<ComputeImage> compute_CreateImage2DWO(size_t width, size_t height, 
 	cl_channel_order ord, cl_channel_type type);
 std::shared_ptr<ComputeImage> compute_CreateImageFromGLWO(GLenum target, GLuint tex);
 void compute_EnqueueWaitForEvent(const ComputeEvent& event);
+void compute_EnqueueMarker();
 void compute_Finish();
 
