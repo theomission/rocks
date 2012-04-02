@@ -127,6 +127,7 @@ static GLuint g_rockHeightTexture;
 static std::shared_ptr<Geom> g_rockGeom;
 static RockTextureParams m_rockParams;
 static std::shared_ptr<ComputeProgram> g_rockGenProgram;
+static std::shared_ptr<ComputeProgram> g_surfConProgram;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Shaders
@@ -278,6 +279,7 @@ static std::shared_ptr<TopMenuItem> MakeMenu()
 	};
 	std::vector<std::shared_ptr<MenuItem>> geomMenu = {
 		std::make_shared<ButtonMenuItem>("regenerate", [](){ generateRockGeom(); }),
+		std::make_shared<ButtonMenuItem>("recompile", [](){ g_surfConProgram->Recompile(); }),
 	};
 	std::vector<std::shared_ptr<MenuItem>> tweakMenu = {
 		std::make_shared<SubmenuMenuItem>("cam", std::move(cameraMenu)),
@@ -338,6 +340,7 @@ static void record_Advance()
 
 static void drawRockGeom(const vec3& sundir, const mat4& matProjView)
 {
+	if(!g_rockGeom) return;
 	mat4 model = MakeScale(vec3(100.0f));
 	mat4 modelIT = TransposeOfInverse(model);
 	mat4 mvp = matProjView * model;
@@ -451,106 +454,162 @@ static void draw(Framedata& frame)
 ////////////////////////////////////////////////////////////////////////////////	
 static void generateRockTexture()
 {
-	auto rockKernel = g_rockGenProgram->CreateKernel("generateRockTexture");
-	if(!rockKernel)
-		return;
+	struct RockGenData 
+	{
+		RockGenData() 
+			: hostImageData(kRockTextureDim * kRockTextureDim * 4)
+			, hostHeightData(kRockTextureDim * kRockTextureDim)
+		{}
 
-	auto imageObj = compute_CreateImage2DWO(kRockTextureDim, kRockTextureDim,
-		CL_RGBA, CL_UNORM_INT8);
-	auto heightObj = compute_CreateImage2DWO(kRockTextureDim, kRockTextureDim,
-		CL_R, CL_UNORM_INT8);
-	rockKernel->SetArg(0, imageObj.get());
-	rockKernel->SetArg(1, heightObj.get());
-	rockKernel->SetArg(2, &m_rockParams.m_marbleDepth);
-	rockKernel->SetArg(3, &m_rockParams.m_marbleTurb);
-	rockKernel->SetArg(4, &m_rockParams.m_baseColor0);
-	rockKernel->SetArg(5, &m_rockParams.m_baseColor1);
-	rockKernel->SetArg(6, &m_rockParams.m_baseColor2);
-	rockKernel->SetArg(7, &m_rockParams.m_darkColor);
-	rockKernel->SetArg(8, &m_rockParams.m_scale);
-	rockKernel->SetArg(9, &m_rockParams.m_noiseScaleColor);
-	rockKernel->SetArg(10, &m_rockParams.m_noiseScaleHeight);
-	rockKernel->SetArg(11, &m_rockParams.m_noiseScalePt);
-	rockKernel->SetArg(12, &m_rockParams.m_lacunarity);
-	rockKernel->SetArg(13, &m_rockParams.m_H);
-	rockKernel->SetArg(14, &m_rockParams.m_octaves);
-	rockKernel->SetArg(15, &m_rockParams.m_offset);
+		std::vector<unsigned char> hostImageData;
+		std::vector<unsigned char> hostHeightData;
+	};
 
-	auto event = rockKernel->EnqueueEv(2, (const size_t[]){kRockTextureDim, kRockTextureDim});
+	auto data = std::make_shared<RockGenData>();
 
-	std::vector<unsigned char> hostImageData(kRockTextureDim * kRockTextureDim * 4);
-	std::vector<unsigned char> hostHeightData(kRockTextureDim * kRockTextureDim);
-	compute_EnqueueWaitForEvent(event);
-	imageObj->EnqueueRead(
-		(const size_t[]){0,0,0}, 
-		(const size_t[]){kRockTextureDim, kRockTextureDim, 1},
-		&hostImageData[0]);
-	heightObj->EnqueueRead(
-		(const size_t[]){0,0,0}, 
-		(const size_t[]){kRockTextureDim, kRockTextureDim, 1},
-		&hostHeightData[0]);
-	compute_Finish();	
+	auto runFunc = [data]() {
+		auto rockKernel = g_rockGenProgram->CreateKernel("generateRockTexture");
+		if(!rockKernel)
+			return;
 
-	// copy to the texture
-	if(!g_rockTexture)
-		glGenTextures(1, &g_rockTexture);
-	if(!g_rockHeightTexture)
-		glGenTextures(1, &g_rockHeightTexture);
+		auto imageObj = compute_CreateImage2DWO(kRockTextureDim, kRockTextureDim,
+				CL_RGBA, CL_UNORM_INT8);
+		auto heightObj = compute_CreateImage2DWO(kRockTextureDim, kRockTextureDim,
+				CL_R, CL_UNORM_INT8);
+		rockKernel->SetArg(0, imageObj.get());
+		rockKernel->SetArg(1, heightObj.get());
+		rockKernel->SetArg(2, &m_rockParams.m_marbleDepth);
+		rockKernel->SetArg(3, &m_rockParams.m_marbleTurb);
+		rockKernel->SetArg(4, &m_rockParams.m_baseColor0);
+		rockKernel->SetArg(5, &m_rockParams.m_baseColor1);
+		rockKernel->SetArg(6, &m_rockParams.m_baseColor2);
+		rockKernel->SetArg(7, &m_rockParams.m_darkColor);
+		rockKernel->SetArg(8, &m_rockParams.m_scale);
+		rockKernel->SetArg(9, &m_rockParams.m_noiseScaleColor);
+		rockKernel->SetArg(10, &m_rockParams.m_noiseScaleHeight);
+		rockKernel->SetArg(11, &m_rockParams.m_noiseScalePt);
+		rockKernel->SetArg(12, &m_rockParams.m_lacunarity);
+		rockKernel->SetArg(13, &m_rockParams.m_H);
+		rockKernel->SetArg(14, &m_rockParams.m_octaves);
+		rockKernel->SetArg(15, &m_rockParams.m_offset);
 
-	glBindTexture(GL_TEXTURE_2D, g_rockTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kRockTextureDim, kRockTextureDim, 0, GL_RGBA, GL_UNSIGNED_BYTE, &hostImageData[0]);
-	glGenerateMipmap(GL_TEXTURE_2D);
-	
-	glBindTexture(GL_TEXTURE_2D, g_rockHeightTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, kRockTextureDim, kRockTextureDim, 0, GL_RED, GL_UNSIGNED_BYTE, &hostHeightData[0]);
-	glGenerateMipmap(GL_TEXTURE_2D);
+		rockKernel->Enqueue(2, (const size_t[]){kRockTextureDim, kRockTextureDim});
+
+		imageObj->EnqueueRead(
+				(const size_t[]){0,0,0}, 
+				(const size_t[]){kRockTextureDim, kRockTextureDim, 1},
+				&data->hostImageData[0]);
+		heightObj->EnqueueRead(
+				(const size_t[]){0,0,0}, 
+				(const size_t[]){kRockTextureDim, kRockTextureDim, 1},
+				&data->hostHeightData[0]);
+		compute_Finish();	
+
+	};
+
+	auto completeFunc = [data]() {
+		// copy to the texture
+		if(!g_rockTexture)
+			glGenTextures(1, &g_rockTexture);
+		if(!g_rockHeightTexture)
+			glGenTextures(1, &g_rockHeightTexture);
+
+		glBindTexture(GL_TEXTURE_2D, g_rockTexture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kRockTextureDim, kRockTextureDim, 0, GL_RGBA, GL_UNSIGNED_BYTE, &data->hostImageData[0]);
+		glGenerateMipmap(GL_TEXTURE_2D);
+
+		glBindTexture(GL_TEXTURE_2D, g_rockHeightTexture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, kRockTextureDim, kRockTextureDim, 0, GL_RED, GL_UNSIGNED_BYTE, &data->hostHeightData[0]);
+		glGenerateMipmap(GL_TEXTURE_2D);
+	};
+
+	task_AppendTask(std::make_shared<Task>(nullptr, completeFunc, runFunc));
 }
 
+////////////////////////////////////////////////////////////////////////////////
 static void generateRockGeom()
 {
-	auto densityKernel = g_rockGenProgram->CreateKernel("generateRockDensity");
-	if(!densityKernel)
-		return;
-	
-	constexpr int kDensityDim = 256;
-	constexpr int densityBufferSliceSize = kDensityDim * kDensityDim ;
-	auto densityBufferA = compute_CreateBufferWO(densityBufferSliceSize);
-	auto densityBufferB = compute_CreateBufferWO(densityBufferSliceSize);
+	struct GeomGenData {
+		GeomGenData()
+			: m_vertData()
+			, m_indexData()
+		{}
 
-	densityKernel->SetArgVal(1, 0.5f); // radius
-	densityKernel->SetArg(2, sizeof(cl_float3), (cl_float3[]){{{10.0f,10.0f,10.0f}}});
-	densityKernel->SetArgVal(3, 2.f); // H
-	densityKernel->SetArgVal(4, 0.7f); // lacunarity
-	densityKernel->SetArgVal(5, 8.8f); // octaves
+		std::vector<float> m_vertData;
+		std::vector<unsigned short> m_indexData;
+	};
 
-	std::vector<unsigned char> hostDensityBuffer(densityBufferSliceSize * kDensityDim);
+	auto data = std::make_shared<GeomGenData>();
 
-	int curBuffer = 0;
-	ComputeEvent lastEvent[2];
-	const ComputeBuffer* buffers[2] = { densityBufferA.get(), densityBufferB.get() };
-	for(int z = 0; z < 2; ++z)
-	{
-		densityKernel->SetArg(0, buffers[curBuffer]);
-		auto taskEv = densityKernel->EnqueueEv(3, 
-				(const size_t[]){0, 0, z},
-				(const size_t[]){kDensityDim, kDensityDim, 1},
-				(const size_t[]){16,16,1},
-				lastEvent[curBuffer].m_event ? 1 : 0, 
-				(const cl_event[]){lastEvent[curBuffer].m_event});
-		auto readEv = buffers[curBuffer]->EnqueueRead(0, densityBufferSliceSize, 
-			&hostDensityBuffer[z * densityBufferSliceSize], 
-			1, (const cl_event[]){taskEv.m_event});
-		lastEvent[curBuffer] = readEv;
-		curBuffer = curBuffer ^ 1;
-	}
-	compute_Finish();
+	auto runFunc = [data]() {
+		auto densityKernel = g_rockGenProgram->CreateKernel("generateRockDensity");
+		if(!densityKernel)
+			return;
 
-	// TODO kick marching tetrahedrons
+		constexpr int kDensityDim = 512;
+		constexpr int densityBufferSliceSize = kDensityDim * kDensityDim ;
+		auto densityBufferA = compute_CreateBufferRW(densityBufferSliceSize);
+		auto densityBufferB = compute_CreateBufferRW(densityBufferSliceSize);
 
-	// TODO create geom from marching tetrahedron output
+		densityKernel->SetArgVal(1, 0.5f); // radius
+		densityKernel->SetArg(2, sizeof(cl_float3), (cl_float3[]){{{10.0f,10.0f,10.0f}}});
+		densityKernel->SetArgVal(3, 2.f); // H
+		densityKernel->SetArgVal(4, 0.7f); // lacunarity
+		densityKernel->SetArgVal(5, 8.8f); // octaves
 
-	// ahem.
-	g_rockGeom = render_GenerateSphereGeom(100,100);
+		std::vector<unsigned char> hostDensityBuffer(densityBufferSliceSize * kDensityDim);
+
+		int curBuffer = 0;
+		ComputeEvent lastEvent[2];
+		const ComputeBuffer* buffers[2] = { densityBufferA.get(), densityBufferB.get() };
+		for(int z = 0; z < kDensityDim; ++z)
+		{
+			densityKernel->SetArg(0, buffers[curBuffer]);
+			densityKernel->SetArgVal(6, z / float(kDensityDim - 1)); // zCoord
+			auto taskEv = densityKernel->EnqueueEv(2, 
+					(const size_t[]){0, 0},
+					(const size_t[]){kDensityDim, kDensityDim},
+					(const size_t[]){16,16},
+					lastEvent[curBuffer].m_event ? 1 : 0, 
+					(const cl_event[]){lastEvent[curBuffer].m_event});
+			auto readEv = buffers[curBuffer]->EnqueueRead(0, densityBufferSliceSize, 
+					&hostDensityBuffer[z * densityBufferSliceSize], 
+					1, (const cl_event[]){taskEv.m_event});
+			lastEvent[curBuffer] = readEv;
+			curBuffer = curBuffer ^ 1;
+		}
+
+		ComputeEvent ev = compute_EnqueueMarker();
+		compute_EnqueueWaitForEvent(ev);
+
+
+		//// TODO OpenCl marching tetrahedrons
+		//auto surfConCountKernel = g_surfConProgram->CreateKernel("countFaces");
+		//if(!surfConCountKernel)
+		//{
+		//	std::cerr << "failed to create surfcon count kernel" << std::endl;
+		//	return;
+		//}
+		//auto surfConCreateKernel = g_surfConProgram->CreateKernel("createFaces");
+		//if(!surfConCreateKernel)
+		//{
+		//	std::cerr << "failed to create surfcon create kernel" << std::endl;
+		//	return;
+		//}
+
+		// kick marching tetrahedrons
+		// first count how many triangles we need so we can allocate buffers
+
+		// TODO create geom from marching tetrahedron output
+		compute_Finish();
+	};
+
+	auto completeFunc = [data]() {
+		// TODO.
+		g_rockGeom = render_GenerateSphereGeom(100,100);
+	};
+
+	task_AppendTask(std::make_shared<Task>(nullptr, completeFunc, runFunc));
 }
 
 ////////////////////////////////////////////////////////////////////////////////	
@@ -559,7 +618,7 @@ static void initialize()
 	tweaker_LoadVars(".settings", g_settingsVars);
 	tweaker_LoadVars("tweaker.txt", g_tweakVars);
 
-	//task_Startup(3);
+	task_Startup(3);
 	dbgdraw_Init();
 	render_Init();
 	framemem_Init(); 
@@ -569,8 +628,11 @@ static void initialize()
 	compute_Init(g_defaultComputeDevice.c_str());
 	g_defaultComputeDevice = compute_GetCurrentDeviceName();
 	g_rockGenProgram = compute_CompileProgram("programs/rock.cl");
+	//g_surfConProgram = compute_CompileProgram("programs/surfcon.cl");
 	g_rockShader = render_CompileShader("shaders/rock.glsl", g_rockShaderUniforms);
 	generateRockTexture();
+	// placeholder geom while it's being generated.
+	g_rockGeom = render_GenerateSphereGeom(10,10);
 	generateRockGeom();
 
 	g_mainCamera = std::make_shared<Camera>(30.f, g_screen.m_aspect);

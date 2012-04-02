@@ -1,6 +1,8 @@
 #include <iostream>
 #include <memory>
 #include <fstream>
+#include "common.hh"
+#include "commonmath.hh"
 #include "compute.hh"
 #include "menu.hh"
 
@@ -78,6 +80,7 @@ static void compute_SetCurrentDevice(cl_device_id id);
 ////////////////////////////////////////////////////////////////////////////////
 // file-scope globals
 static std::shared_ptr<ComputeContext> g_context;
+static std::shared_ptr<ComputeProgram> g_prefixSumProgram;
 
 ////////////////////////////////////////////////////////////////////////////////
 // util
@@ -185,6 +188,10 @@ void compute_Init(const char* requestedDevice)
 
 	if(!g_context)
 		std::cerr << "compute_Init() failed." << std::endl;
+	else
+	{
+		g_prefixSumProgram = compute_CompileProgram("programs/prefixsum.cl");
+	}
 }
 
 cl_device_id compute_FindDeviceByName(const char* name)
@@ -423,6 +430,12 @@ void ComputeKernel::SetArg(int index, size_t arg_size, const void* value) const
 	compute_CheckError(ret, "clSetKernelArg");
 }
 	
+void ComputeKernel::SetArgTempSize(int index, size_t size) const
+{
+	cl_int ret = clSetKernelArg(m_kernel, index, size, nullptr);
+	compute_CheckError(ret, "clSetKernelArg");
+}
+	
 void ComputeKernel::Enqueue(cl_uint dims, const size_t* globalWorkSize, const size_t* localWorkSize,
 	cl_uint numEvents, const cl_event* events) const
 {
@@ -542,6 +555,20 @@ ComputeEvent ComputeBuffer::EnqueueRead(size_t offset, size_t cb, void* hostMem,
 	return event;
 }
 
+ComputeEvent ComputeBuffer::EnqueueWrite(size_t offset, size_t cb, const void* hostMem,
+	cl_uint numEvents, const cl_event* events) const
+{
+	cl_event event = {};
+	if(!m_mem) {
+		std::cerr << "EnqueueRead on invalid buffer" << std::endl;
+		return 0;
+	}
+	cl_int ret = clEnqueueWriteBuffer(g_context->m_queue, m_mem, CL_FALSE,
+		offset, cb, hostMem, numEvents, events, &event);
+	compute_CheckError(ret, "clEnqueueWriteBuffer");
+	return event;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //ComputeImage::ComputeImage(cl_context ctx, cl_mem_flags flags, const cl_image_format* image_format,
 //	const cl_image_desc *image_desc, void* ptr)
@@ -557,6 +584,15 @@ ComputeImage::ComputeImage(cl_context ctx, cl_mem_flags flags, const cl_image_fo
 {
 	cl_int err;
 	m_mem = clCreateImage2D(ctx, flags, image_format, width, height, pitch, ptr, &err);
+	compute_CheckError(err, "clCreateImage2D");
+}
+	
+ComputeImage::ComputeImage(cl_context ctx, cl_mem_flags flags, const cl_image_format* image_format, 
+			size_t width, size_t height, size_t depth,
+			size_t rowPitch, size_t slicePitch, void* ptr)
+{
+	cl_int err;
+	m_mem = clCreateImage3D(ctx, flags, image_format, width, height, depth, rowPitch, slicePitch, ptr, &err);
 	compute_CheckError(err, "clCreateImage2D");
 }
 
@@ -599,11 +635,16 @@ ComputeEvent ComputeImage::EnqueueRead(const size_t origin[3], const size_t regi
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-std::shared_ptr<ComputeBuffer> compute_CreateBufferRO(size_t size, void* hostData)
+std::shared_ptr<ComputeBuffer> compute_CreateBufferRO(size_t size, const void* hostData)
 {
 	if(!g_context) return nullptr;
+	cl_mem_flags flags = CL_MEM_READ_ONLY;
+	if(hostData)
+		flags |= CL_MEM_COPY_HOST_PTR;
+	// note: const_cast used here because this buffer is created by copying the host mem ptr, not
+	// using it. OpenCL only has the one create buffer function and it takes a non-const ptr.
 	return std::make_shared<ComputeBuffer>(g_context->m_context, 
-		CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, size, hostData);
+		flags, size, const_cast<void*>(hostData));
 }
 
 std::shared_ptr<ComputeBuffer> compute_CreateBufferWO(size_t size) 
@@ -613,14 +654,16 @@ std::shared_ptr<ComputeBuffer> compute_CreateBufferWO(size_t size)
 		CL_MEM_WRITE_ONLY, size, nullptr);
 }
 
-std::shared_ptr<ComputeBuffer> compute_CreateBufferRW(size_t size, void* hostData) 
+std::shared_ptr<ComputeBuffer> compute_CreateBufferRW(size_t size, const void* hostData) 
 {
 	if(!g_context) return nullptr;
 	cl_mem_flags flags = CL_MEM_READ_WRITE;
 	if(hostData)
 		flags |= CL_MEM_COPY_HOST_PTR;
+	// note: const_cast used here because this buffer is created by copying the host mem ptr, not
+	// using it. OpenCL only has the one create buffer function and it takes a non-const ptr.
 	return std::make_shared<ComputeBuffer>(g_context->m_context, 
-		flags, size, hostData);
+		flags, size, const_cast<void*>(hostData));
 }
 
 std::shared_ptr<ComputeImage> compute_CreateImage2DWO(size_t width, size_t height, 
@@ -637,6 +680,22 @@ std::shared_ptr<ComputeImage> compute_CreateImage2DWO(size_t width, size_t heigh
 		nullptr);
 }
 
+std::shared_ptr<ComputeImage> compute_CreateImage3DWO(size_t width, size_t height, size_t depth,
+	cl_channel_order ord, cl_channel_type type)
+{
+	if(!g_context) return nullptr;
+
+	return std::make_shared<ComputeImage>(g_context->m_context,
+		CL_MEM_WRITE_ONLY, 
+		(const cl_image_format[]){{ord, type}}, 
+		width,
+		height,
+		depth,
+		0,
+		0,
+		nullptr);
+}
+
 std::shared_ptr<ComputeImage> compute_CreateImageFromGLWO(GLenum target, GLuint tex)
 {
 	if(!g_context) return nullptr;
@@ -644,7 +703,7 @@ std::shared_ptr<ComputeImage> compute_CreateImageFromGLWO(GLenum target, GLuint 
 		target, tex);
 }
 
-void compute_EnqueueWaitForEvent(const ComputeEvent& event)
+void compute_WaitForEvent(const ComputeEvent& event)
 {
 	if(event.m_event)
 		clWaitForEvents(1, (const cl_event[]){event.m_event});
@@ -652,15 +711,87 @@ void compute_EnqueueWaitForEvent(const ComputeEvent& event)
 		std::cerr << "waiting for null event!" << std::endl;
 }
 
-void compute_EnqueueMarker()
+void compute_EnqueueWaitForEvent(const ComputeEvent& event)
 {
-	cl_int ret = clEnqueueMarker(g_context->m_queue, nullptr);
+	if(event.m_event)
+		clEnqueueWaitForEvents(g_context->m_queue, 1, (const cl_event[]){event.m_event});
+	else 
+		std::cerr << "waiting for null event!" << std::endl;
+}
+
+ComputeEvent compute_EnqueueMarker()
+{
+	cl_event ev = {};
+	cl_int ret = clEnqueueMarker(g_context->m_queue, &ev);
 	compute_CheckError(ret, "clEnqueueMarker");
+	return ev;
 }
 
 void compute_Finish()
 {
 	if(!g_context) return ;
 	clFinish(g_context->m_queue);
+}
+
+ComputeEvent compute_PrefixSum(unsigned int* in, unsigned int* out, unsigned int size)
+{
+	auto sumKernel = g_prefixSumProgram->CreateKernel("prefixSum");
+	
+	constexpr unsigned int blockSize = 512;
+	const unsigned int numBlocks = (size + 511) / blockSize;
+	unsigned int bufSize = numBlocks > 1 ? blockSize : size;
+	unsigned int alignedBufSize = (bufSize + 3) & ~3;
+
+	auto outBuffer = compute_CreateBufferWO(sizeof(unsigned int) * alignedBufSize);
+	auto inBuffer = compute_CreateBufferRO(sizeof(unsigned int) * alignedBufSize);
+	sumKernel->SetArg(0, outBuffer.get());
+	sumKernel->SetArg(1, inBuffer.get());
+	sumKernel->SetArgTempSize(3, 2 * blockSize * sizeof(unsigned int));
+
+	ComputeEvent lastEv;
+	unsigned int inOffset = 0;
+	for(unsigned int i = 0; i < numBlocks; ++i)
+	{
+		unsigned int totalSizeLeft = size - inOffset;
+		unsigned int curSize = Min(blockSize, totalSizeLeft);
+		auto writeEv = inBuffer->EnqueueWrite(0, sizeof(unsigned int) * curSize, &in[inOffset], 
+			lastEv.m_event ? 1 : 0, &lastEv.m_event);
+		unsigned int curSizeArg = (curSize + 3) & ~3;
+		sumKernel->SetArg(2, &curSizeArg);
+		auto kernelEv = sumKernel->EnqueueEv(1, (const size_t[]){curSizeArg}, nullptr, 1, &writeEv.m_event);
+		auto readEv = outBuffer->EnqueueRead(0, sizeof(unsigned int) * curSize, &out[inOffset],
+			1, &kernelEv.m_event);
+		lastEv = readEv;
+		inOffset += blockSize;
+	}
+
+	// merge blocks now that each sub part has been summed
+	if(numBlocks > 1)
+	{
+		auto mergeKernel = g_prefixSumProgram->CreateKernel("mergeSumBlock");
+		mergeKernel->SetArg(0, outBuffer.get());
+		mergeKernel->SetArg(1, inBuffer.get());
+
+
+		inOffset = blockSize;
+		for(unsigned int i = 1; i < numBlocks; ++i)
+		{
+			unsigned int totalSizeLeft = size - inOffset;
+			unsigned int curSize = Min(blockSize, totalSizeLeft);
+			compute_WaitForEvent(lastEv);
+			unsigned int prevMax = out[ (i-1)*blockSize + (blockSize-1) ];
+			mergeKernel->SetArg(2, &prevMax);
+			std::cout << "prev max index = " <<  (i-1)*blockSize + (blockSize-1) <<" prev max = " << prevMax << std::endl;
+			auto writeEv = inBuffer->EnqueueWrite(0, sizeof(unsigned int) * curSize, &out[inOffset],
+				lastEv.m_event ? 1 : 0, &lastEv.m_event);
+			auto kernelEv = mergeKernel->EnqueueEv(1, (const size_t[]){curSize}, nullptr, 1, &writeEv.m_event);
+			auto readEv = outBuffer->EnqueueRead(0, sizeof(unsigned int) * curSize, &out[inOffset],
+				1, &kernelEv.m_event);
+			lastEv = readEv;
+			inOffset += blockSize;
+		}
+	}
+	
+	return lastEv;
 }
 

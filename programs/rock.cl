@@ -61,20 +61,21 @@ __kernel void generateRockDensity(
 	float3 noiseScale,
 	float H,
 	float lacunarity,
-	float octaves
+	float octaves,
+	float zCoord
 	)
 {
-	int3 coords = (int3)(get_global_id(0), get_global_id(1), get_global_id(2));
-	int3 dims = (int3)(get_global_size(0), get_global_size(1), get_global_size(2));
+	int2 coords = (int2)(get_global_id(0), get_global_id(1));
+	int2 dims = (int2)(get_global_size(0), get_global_size(1));
 	
-	float3 fcoords = convert_float3(coords) / convert_float3(dims - (int3)(1));
+	float3 pt = (float3)(convert_float2(coords) / convert_float2(dims - (int2)(1)), zCoord);
 	const float3 center = (float3)(0.5,0.5,0.5);
-	float3 diff = fcoords - center;
+	float3 diff = pt - center;
 	float len = length(diff);
 
-	len += fbmNoise3(fcoords * noiseScale, H, lacunarity, octaves);
+	len += fbmNoise3(pt * noiseScale, H, lacunarity, octaves);
 
-	int index = coords.x + coords.y * dims.y + coords.z * (dims.y * dims.x);
+	int index = coords.x + coords.y * dims.y;
 	float density = smoothstep(0, 0.1, radius - len);
 	outDensity[index] = clamp(density, 0.0f, 1.0f) * 255;
 }

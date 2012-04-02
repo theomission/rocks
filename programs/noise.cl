@@ -1,3 +1,5 @@
+// -*- C -*-
+
 #ifndef INCLUDED_OPENCL_NOISE
 #define INCLUDED_OPENCL_NOISE
 

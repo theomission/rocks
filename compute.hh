@@ -65,6 +65,7 @@ public:
 		void SetArgVal(int index, const T& val) const {
 			SetArg(index, sizeof(T), &val);
 		}
+	void SetArgTempSize(int index, size_t size) const;
 
 	void Enqueue(cl_uint dims, const size_t* globalWorkSize, const size_t* localWorkSize = nullptr,
 		cl_uint numEvents = 0, const cl_event* events = nullptr) const;
@@ -91,6 +92,8 @@ public:
 
 	ComputeEvent EnqueueRead(size_t offset, size_t cb, void* hostMem, 
 		cl_uint numEvents = 0, const cl_event* events = nullptr) const;
+	ComputeEvent EnqueueWrite(size_t offset, size_t cb, const void* hostMem, 
+		cl_uint numEvents = 0, const cl_event* events = nullptr) const;
 private:
 	cl_mem m_mem;
 };
@@ -105,6 +108,9 @@ public:
 	ComputeImage(cl_context ctx, cl_mem_flags flags, const cl_image_format* image_format, 
 			size_t width, size_t height, 
 			size_t pitch, void* ptr);
+	ComputeImage(cl_context ctx, cl_mem_flags flags, const cl_image_format* image_format, 
+			size_t width, size_t height, size_t depth,
+			size_t rowPitch, size_t slicePitch, void* ptr);
 	ComputeImage(cl_context ctx, cl_mem_flags flags, GLenum target, GLuint texture);
 	~ComputeImage();
 
@@ -151,14 +157,19 @@ std::vector<ComputePlatform> compute_GetPlatforms();
 std::shared_ptr<ComputeProgram> compute_CompileProgram(const char* filename);
 
 // buffer creation functions
-std::shared_ptr<ComputeBuffer> compute_CreateBufferRO(size_t size, void* hostData);
-std::shared_ptr<ComputeBuffer> compute_CreateBufferRW(size_t size, void* hostData = nullptr);
+std::shared_ptr<ComputeBuffer> compute_CreateBufferRO(size_t size, const void* hostData = nullptr);
+std::shared_ptr<ComputeBuffer> compute_CreateBufferRW(size_t size, const void* hostData = nullptr);
 std::shared_ptr<ComputeBuffer> compute_CreateBufferWO(size_t size);
 
 std::shared_ptr<ComputeImage> compute_CreateImage2DWO(size_t width, size_t height, 
 	cl_channel_order ord, cl_channel_type type);
+std::shared_ptr<ComputeImage> compute_CreateImage3DWO(size_t width, size_t height, size_t depth,
+	cl_channel_order ord, cl_channel_type type);
 std::shared_ptr<ComputeImage> compute_CreateImageFromGLWO(GLenum target, GLuint tex);
 void compute_EnqueueWaitForEvent(const ComputeEvent& event);
-void compute_EnqueueMarker();
+void compute_WaitForEvent(const ComputeEvent& event);
+ComputeEvent compute_EnqueueMarker();
 void compute_Finish();
+ComputeEvent compute_PrefixSum(unsigned int* in, unsigned int* out, unsigned int size);
+
 
