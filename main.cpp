@@ -634,7 +634,7 @@ static void generateRockGeom()
 			m_densityParams.m_isolevel, 
 			&densityField[0], 
 			kDensityDim, kDensityDim, kDensityDim);
-		data->m_mesh->CacheSort(32);
+		//data->m_mesh->CacheSort(32);
 		data->m_mesh->ComputeNormals();
 	};
 

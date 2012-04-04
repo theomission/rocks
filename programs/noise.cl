@@ -182,7 +182,7 @@ float turbulence(float3 pt, int depth)
 
 float marble(float3 npt, float turbulenceMult, float power, float depth)
 {
-	float val= npt.y + npt.x + turbulenceMult * turbulence(npt, depth);
+	float val = npt.y + npt.x + turbulenceMult * turbulence(npt, depth);
 	val = 0.5 * sin(M_PI * val) + 0.5;
 	val = 1.0 - pow(val,power);
 	return val;
