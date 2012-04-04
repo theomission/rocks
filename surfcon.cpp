@@ -41,25 +41,25 @@ static const int g_triTable[16][6] =
 	{ -1, -1, -1, -1, -1, -1 }, // 1111
 };
 
-static inline vec3 InterpPoints(float isolevel, const vec3& v0, const vec3& v1, float d0, float d1)
+static inline vec3 InterpPoints(const vec3& v0, const vec3& v1, float d0, float d1)
 {
-	float t = isolevel - d0 / (d1 - d0);
+	float t = d0 / (d0 - d1);
 	t = Clamp(t, 0.f, 1.f);
 	return (1.f - t) * v0 + t * v1;
 }
 
-static inline unsigned int MakeTableIndex(float isolevel, float (&distances)[4])
+static inline unsigned int MakeTableIndex(float (&distances)[4])
 {
 	unsigned int index = 0;
-	index |= distances[0] < isolevel ? 1 : 0;
-	index |= distances[1] < isolevel ? 2 : 0;
-	index |= distances[2] < isolevel ? 4 : 0;
-	index |= distances[3] < isolevel ? 8 : 0;
+	index |= distances[0] < 0 ? 1 : 0;
+	index |= distances[1] < 0 ? 2 : 0;
+	index |= distances[2] < 0 ? 4 : 0;
+	index |= distances[3] < 0 ? 8 : 0;
 	return index;
 }
 
 static void surfcon_CreateFaces(TriSoup* result,
-	PointGrid& grid, float isolevel,
+	PointGrid& grid, 
 	const float *samples, const vec3* points);
 
 std::shared_ptr<TriSoup> surfcon_CreateMeshFromDensityField(
@@ -110,9 +110,9 @@ std::shared_ptr<TriSoup> surfcon_CreateMeshFromDensityField(
 
 				float samples[8];
 				for(int i = 0; i < 8; ++i) 
-					samples[i] = densityField[offsets[i]];
+					samples[i] = densityField[offsets[i]] - isolevel;
 			
-				surfcon_CreateFaces(mesh, grid, isolevel, samples, points);
+				surfcon_CreateFaces(mesh, grid, samples, points);
 
 			}
 			yOffset += width;
@@ -127,33 +127,33 @@ std::shared_ptr<TriSoup> surfcon_CreateMeshFromDensityField(
 }
 
 static void surfcon_CreateTetrahedronTris(TriSoup* result,
-	PointGrid& grid, float isolevel,
+	PointGrid& grid, 
 	const float* samples, const vec3* points, int v0, int v1, int v2, int v3)
 {
 	float localSamples[4] = {
 		samples[v0], samples[v1], samples[v2], samples[v3] };
-	unsigned int tetIndex = MakeTableIndex(isolevel, localSamples);
+	unsigned int tetIndex = MakeTableIndex(localSamples);
 	int edges = g_edgeTable[tetIndex];
 	
 	int edgeVerts[6] = {-1,-1,-1,-1,-1,-1};
 	if(edges & 1)
 		edgeVerts[0] = UniqueAddVertex(result, grid, 
-			InterpPoints(isolevel, points[v0], points[v1], samples[v0], samples[v1]));
+			InterpPoints(points[v0], points[v1], samples[v0], samples[v1]));
 	if(edges & 2)
 		edgeVerts[1] = UniqueAddVertex(result, grid,
-			InterpPoints(isolevel, points[v1], points[v2], samples[v1], samples[v2]));
+			InterpPoints(points[v1], points[v2], samples[v1], samples[v2]));
 	if(edges & 4)
 		edgeVerts[2] = UniqueAddVertex(result, grid,
-			InterpPoints(isolevel, points[v2], points[v0], samples[v2], samples[v0]));
+			InterpPoints(points[v2], points[v0], samples[v2], samples[v0]));
 	if(edges & 8)
 		edgeVerts[3] = UniqueAddVertex(result, grid,
-			InterpPoints(isolevel, points[v0], points[v3], samples[v0], samples[v3]));
+			InterpPoints(points[v0], points[v3], samples[v0], samples[v3]));
 	if(edges & 16)
 		edgeVerts[4] = UniqueAddVertex(result, grid,
-			InterpPoints(isolevel, points[v1], points[v3], samples[v1], samples[v3]));
+			InterpPoints(points[v1], points[v3], samples[v1], samples[v3]));
 	if(edges & 32)
 		edgeVerts[5] = UniqueAddVertex(result, grid,
-			InterpPoints(isolevel, points[v2], points[v3], samples[v2], samples[v3]));
+			InterpPoints(points[v2], points[v3], samples[v2], samples[v3]));
 
 	const int* triTable = g_triTable[tetIndex];
 	for(int i = 0; i < 6 && triTable[i] >= 0; i += 3)
@@ -166,14 +166,13 @@ static void surfcon_CreateTetrahedronTris(TriSoup* result,
 
 static void surfcon_CreateFaces(TriSoup* result,
 	PointGrid& grid,
-	float isolevel,
 	const float *samples, const vec3* points)
 {
-	surfcon_CreateTetrahedronTris(result, grid, isolevel, samples, points, 0, 3, 1, 5);
-	surfcon_CreateTetrahedronTris(result, grid, isolevel, samples, points, 1, 3, 2, 5);
-	surfcon_CreateTetrahedronTris(result, grid, isolevel, samples, points, 4, 5, 7, 3);
-	surfcon_CreateTetrahedronTris(result, grid, isolevel, samples, points, 5, 6, 7, 3);
-	surfcon_CreateTetrahedronTris(result, grid, isolevel, samples, points, 0, 5, 4, 3);
-	surfcon_CreateTetrahedronTris(result, grid, isolevel, samples, points, 5, 2, 6, 3);
+	surfcon_CreateTetrahedronTris(result, grid, samples, points, 0, 3, 1, 5);
+	surfcon_CreateTetrahedronTris(result, grid, samples, points, 1, 3, 2, 5);
+	surfcon_CreateTetrahedronTris(result, grid, samples, points, 4, 5, 7, 3);
+	surfcon_CreateTetrahedronTris(result, grid, samples, points, 5, 6, 7, 3);
+	surfcon_CreateTetrahedronTris(result, grid, samples, points, 0, 5, 4, 3);
+	surfcon_CreateTetrahedronTris(result, grid, samples, points, 5, 2, 6, 3);
 }
 
