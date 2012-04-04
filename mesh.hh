@@ -83,7 +83,7 @@ private:
 	std::vector<std::shared_ptr<VecListType>> m_grid;
 	float m_dim;
 
-	constexpr static float kEpsilon = 1e-3f;
+	constexpr static float kEpsilon = 1e-4f;
 	constexpr static float kEpsilonSq = kEpsilon * kEpsilon;
 };
 

@@ -407,7 +407,10 @@ static void drawRockGeom(const vec3& sundir, const mat4& matProjView)
 	constexpr float invTexDim = 1.0 / kRockTextureDim;
 	glUniform2f(texDimLoc, invTexDim, invTexDim);
 
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_BACK);
 	g_rockGeom->Render(*shader);
+	glDisable(GL_CULL_FACE);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -631,6 +634,7 @@ static void generateRockGeom()
 			m_densityParams.m_isolevel, 
 			&densityField[0], 
 			kDensityDim, kDensityDim, kDensityDim);
+		data->m_mesh->CacheSort(32);
 		data->m_mesh->ComputeNormals();
 	};
 
