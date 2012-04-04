@@ -58,6 +58,7 @@ Geom::Geom(int numVerts, const float* verts,
 		const std::vector<GeomBindPair>& elements)
 	: m_stride(vertStride)
 	, m_glPrimType(glPrimType)
+	, m_glIndexType(GL_UNSIGNED_SHORT)
 	, m_numIndices(numIndices)
 	, m_elements(elements)
 {
@@ -65,7 +66,25 @@ Geom::Geom(int numVerts, const float* verts,
 	glBindBuffer(GL_ARRAY_BUFFER, m_buffer[VTX_BUFFER]);
 	glBufferData(GL_ARRAY_BUFFER, numVerts * vertStride, verts, GL_STATIC_DRAW);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_buffer[IDX_BUFFER]);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, numIndices * sizeof(unsigned short), indices, GL_STATIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, numIndices * sizeof(*indices), indices, GL_STATIC_DRAW);
+	checkGlError("Geom::Geom");
+}
+
+Geom::Geom(int numVerts, const float* verts, 
+		int numIndices, const unsigned int* indices,
+		int vertStride, int glPrimType, 
+		const std::vector<GeomBindPair>& elements)
+	: m_stride(vertStride)
+	, m_glPrimType(glPrimType)
+	, m_glIndexType(GL_UNSIGNED_INT)
+	, m_numIndices(numIndices)
+	, m_elements(elements)
+{
+	glGenBuffers(2, m_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER, m_buffer[VTX_BUFFER]);
+	glBufferData(GL_ARRAY_BUFFER, numVerts * vertStride, verts, GL_STATIC_DRAW);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_buffer[IDX_BUFFER]);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, numIndices * sizeof(*indices), indices, GL_STATIC_DRAW);
 	checkGlError("Geom::Geom");
 }
 
@@ -99,7 +118,7 @@ void Geom::Bind(const ShaderInfo& shader)
 
 void Geom::Submit()
 {
-	glDrawElements(m_glPrimType, m_numIndices, GL_UNSIGNED_SHORT, 0);
+	glDrawElements(m_glPrimType, m_numIndices, m_glIndexType, 0);
 }
 
 void Geom::Unbind(const ShaderInfo& shader)

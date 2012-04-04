@@ -9,10 +9,14 @@ class AABB
 {
 public:
 	AABB() : m_min(FLT_MAX), m_max(-FLT_MAX) {}
+	AABB(const vec3& min_, const vec3& max_)  : m_min(min_), m_max(max_) { }
 	vec3 m_min;
 	vec3 m_max;
 
 	void Extend(const vec3& v);
+	float Width() const { return m_max.x - m_min.x; }
+	float Height() const { return m_max.y - m_min.y; }
+	float Depth() const { return m_max.z - m_min.z; }
 } ;
 
 class OBB

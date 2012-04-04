@@ -56,7 +56,7 @@ __kernel void generateRockTexture(
 }
 
 __kernel void generateRockDensity(
-	__write_only __global unsigned char *outDensity,
+	__write_only __global float *outDensity,
 	float radius,
 	float3 noiseScale,
 	float H,
@@ -73,10 +73,10 @@ __kernel void generateRockDensity(
 	float3 diff = pt - center;
 	float len = length(diff);
 
-	len += fbmNoise3(pt * noiseScale, H, lacunarity, octaves);
+	len += 0.03 * fbmNoise3(pt * noiseScale, H, lacunarity, octaves);
 
-	int index = coords.x + coords.y * dims.y;
-	float density = smoothstep(0, 0.1, radius - len);
-	outDensity[index] = clamp(density, 0.0f, 1.0f) * 255;
+	int index = coords.x + coords.y * dims.x;
+	float density = len - radius;//smoothstep(0, 0.1, radius - len);
+	outDensity[index] = density;
 }
 

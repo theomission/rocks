@@ -614,7 +614,8 @@ ComputeImage::~ComputeImage()
 	if(m_mem) clReleaseMemObject(m_mem);
 }
 	
-ComputeEvent ComputeImage::EnqueueRead(const size_t origin[3], const size_t region[3], void* ptr)
+ComputeEvent ComputeImage::EnqueueRead(const size_t origin[3], const size_t region[3], void* ptr,
+		size_t rowPitch, size_t slicePitch, cl_uint numEvents, const cl_event* events)
 {
 	if(!m_mem) {
 		std::cerr << "Invalid image" << std::endl;
@@ -626,11 +627,36 @@ ComputeEvent ComputeImage::EnqueueRead(const size_t origin[3], const size_t regi
 		CL_FALSE,
 		origin,
 		region,
-		0, 0,
+		rowPitch, 
+		slicePitch,
 		ptr,
-		0, nullptr,
+		numEvents, 
+		events,
 		&event);
 	compute_CheckError(ret, "clEnqueueReadImage");
+	return event;
+}
+
+ComputeEvent ComputeImage::EnqueueWrite(const size_t origin[3], const size_t region[3], const void* ptr,
+	size_t rowPitch, size_t slicePitch, cl_uint numEvents, const cl_event* events)
+{
+	if(!m_mem) {
+		std::cerr << "Invalid image" << std::endl;
+		return 0;
+	}
+	cl_event event = {};
+	cl_int ret = clEnqueueWriteImage(g_context->m_queue,
+		m_mem,
+		CL_FALSE,
+		origin,
+		region,
+		rowPitch,
+		slicePitch,
+		ptr, 
+		numEvents,
+		events,
+		&event);
+	compute_CheckError(ret, "clEnqueueWriteImage");
 	return event;
 }
 
@@ -680,6 +706,20 @@ std::shared_ptr<ComputeImage> compute_CreateImage2DWO(size_t width, size_t heigh
 		nullptr);
 }
 
+std::shared_ptr<ComputeImage> compute_CreateImage2DRW(size_t width, size_t height, 
+	cl_channel_order ord, cl_channel_type type)
+{
+	if(!g_context) return nullptr;
+
+	return std::make_shared<ComputeImage>(g_context->m_context,
+		CL_MEM_READ_WRITE, 
+		(const cl_image_format[]){{ord, type}}, 
+		width,
+		height,
+		0,
+		nullptr);
+}
+
 std::shared_ptr<ComputeImage> compute_CreateImage3DWO(size_t width, size_t height, size_t depth,
 	cl_channel_order ord, cl_channel_type type)
 {
@@ -687,6 +727,38 @@ std::shared_ptr<ComputeImage> compute_CreateImage3DWO(size_t width, size_t heigh
 
 	return std::make_shared<ComputeImage>(g_context->m_context,
 		CL_MEM_WRITE_ONLY, 
+		(const cl_image_format[]){{ord, type}}, 
+		width,
+		height,
+		depth,
+		0,
+		0,
+		nullptr);
+}
+
+std::shared_ptr<ComputeImage> compute_CreateImage3DRO(size_t width, size_t height, size_t depth,
+	cl_channel_order ord, cl_channel_type type)
+{
+	if(!g_context) return nullptr;
+
+	return std::make_shared<ComputeImage>(g_context->m_context,
+		CL_MEM_READ_ONLY, 
+		(const cl_image_format[]){{ord, type}}, 
+		width,
+		height,
+		depth,
+		0,
+		0,
+		nullptr);
+}
+
+std::shared_ptr<ComputeImage> compute_CreateImage3DRW(size_t width, size_t height, size_t depth,
+	cl_channel_order ord, cl_channel_type type)
+{
+	if(!g_context) return nullptr;
+
+	return std::make_shared<ComputeImage>(g_context->m_context,
+		CL_MEM_READ_WRITE, 
 		(const cl_image_format[]){{ord, type}}, 
 		width,
 		height,

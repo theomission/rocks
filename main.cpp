@@ -25,6 +25,8 @@
 #include "gputask.hh"
 #include "timer.hh"
 #include "compute.hh"
+#include "mesh.hh"
+#include "surfcon.hh"
 
 ////////////////////////////////////////////////////////////////////////////////
 // types
@@ -62,8 +64,28 @@ public:
 	float m_H;
 	int m_octaves;
 	float m_offset;
-
 };
+
+class RockDensityParams
+{
+public:
+	RockDensityParams()
+		: m_radius(0.5f)
+		, m_noiseScale(10.0)
+		, m_H(2.f)
+		, m_lacunarity(0.7f)
+		, m_octaves(8.8f)
+		, m_isolevel(0.f)
+	{}
+
+	float m_radius;
+	vec3 m_noiseScale;
+	float m_H;
+	float m_lacunarity;
+	float m_octaves;
+	float m_isolevel;
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 // file scope globals
 
@@ -126,8 +148,8 @@ static GLuint g_rockTexture;
 static GLuint g_rockHeightTexture;
 static std::shared_ptr<Geom> g_rockGeom;
 static RockTextureParams m_rockParams;
+static RockDensityParams m_densityParams;
 static std::shared_ptr<ComputeProgram> g_rockGenProgram;
-static std::shared_ptr<ComputeProgram> g_surfConProgram;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Shaders
@@ -179,6 +201,12 @@ static std::vector<std::shared_ptr<TweakVarBase>> g_tweakVars = {
 	std::make_shared<TweakFloat>("rocktexture.H", &m_rockParams.m_H, 2.0),
 	std::make_shared<TweakInt>("rocktexture.octaves", &m_rockParams.m_octaves, 5),
 	std::make_shared<TweakFloat>("rocktexture.offset", &m_rockParams.m_offset, 2),
+	std::make_shared<TweakFloat>("rockdensity.radius", &m_densityParams.m_radius, 0.5f),
+	std::make_shared<TweakVector>("rockdensity.noiseScale", &m_densityParams.m_noiseScale, vec3(10.0)),
+	std::make_shared<TweakFloat>("rockdensity.H", &m_densityParams.m_H, 2.f),
+	std::make_shared<TweakFloat>("rockdensity.lacunarity", &m_densityParams.m_lacunarity, 0.7f),
+	std::make_shared<TweakFloat>("rockdensity.octaves", &m_densityParams.m_octaves, 8.8f),
+	std::make_shared<TweakFloat>("rockdensity.isolevel", &m_densityParams.m_isolevel, 0.0f),
 };
 
 static void SaveCurrentCamera()
@@ -279,7 +307,13 @@ static std::shared_ptr<TopMenuItem> MakeMenu()
 	};
 	std::vector<std::shared_ptr<MenuItem>> geomMenu = {
 		std::make_shared<ButtonMenuItem>("regenerate", [](){ generateRockGeom(); }),
-		std::make_shared<ButtonMenuItem>("recompile", [](){ g_surfConProgram->Recompile(); }),
+		std::make_shared<FloatSliderMenuItem>("radius", &m_densityParams.m_radius, 0.1f),
+		std::make_shared<VecSliderMenuItem>("noiseScale", &m_densityParams.m_noiseScale),
+		std::make_shared<FloatSliderMenuItem>("H", &m_densityParams.m_H, 0.1f),
+		std::make_shared<FloatSliderMenuItem>("lacunarity", &m_densityParams.m_lacunarity, 0.1f),
+		std::make_shared<FloatSliderMenuItem>("octaves", &m_densityParams.m_octaves, 1.f),
+		std::make_shared<FloatSliderMenuItem>("isolevel", &m_densityParams.m_isolevel, 0.1f),
+		std::make_shared<ButtonMenuItem>("recompile", [](){ g_rockGenProgram->Recompile(); }),
 	};
 	std::vector<std::shared_ptr<MenuItem>> tweakMenu = {
 		std::make_shared<SubmenuMenuItem>("cam", std::move(cameraMenu)),
@@ -527,86 +561,81 @@ static void generateRockTexture()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+std::vector<float> computeDensityField(unsigned int width, unsigned int height, unsigned int depth)
+{
+	std::vector<float> result(width*height*depth);
+	auto densityKernel = g_rockGenProgram->CreateKernel("generateRockDensity");
+	if(!densityKernel)
+	{
+		std::cerr << "failed to create generateRockDensity kernel" << std::endl;
+		return result;
+	}
+		
+	const unsigned int densityBufferSliceSize = width*height*sizeof(float);
+		
+	densityKernel->SetArg(1, &m_densityParams.m_radius); // radius
+	float nx = m_densityParams.m_noiseScale.x;
+	float ny = m_densityParams.m_noiseScale.y;
+	float nz = m_densityParams.m_noiseScale.z;
+	densityKernel->SetArg(2, sizeof(cl_float3), (cl_float3[]){{{nx,ny,nz}}});
+	densityKernel->SetArg(3, &m_densityParams.m_H); // H
+	densityKernel->SetArg(4, &m_densityParams.m_lacunarity); // lacunarity
+	densityKernel->SetArg(5, &m_densityParams.m_octaves); // octaves
+
+	auto densityBufferA = compute_CreateBufferRW(densityBufferSliceSize);
+	auto densityBufferB = compute_CreateBufferRW(densityBufferSliceSize);
+
+	// hardware I have doesn't do 3D image writes, so compute the buffer a slice at a time
+	int curBuffer = 0;
+	ComputeEvent lastEvent[2];
+	const ComputeBuffer* buffers[2] = { densityBufferA.get(), densityBufferB.get() };
+	for(unsigned int z = 0; z < depth; ++z)
+	{
+		densityKernel->SetArg(0, buffers[curBuffer]);
+		densityKernel->SetArgVal(6, z / float(depth - 1)); // zCoord
+		auto taskEv = densityKernel->EnqueueEv(2, 
+				(const size_t[]){width, height},
+				nullptr,
+				lastEvent[curBuffer].m_event ? 1 : 0, 
+				(const cl_event[]){lastEvent[curBuffer].m_event});
+		auto readEv = buffers[curBuffer]->EnqueueRead(0, densityBufferSliceSize, 
+				&result[z * width * height], 
+				1, (const cl_event[]){taskEv.m_event});
+		lastEvent[curBuffer] = readEv;
+		curBuffer = curBuffer ^ 1;
+	}
+
+	ComputeEvent ev = compute_EnqueueMarker();
+	compute_WaitForEvent(ev);
+
+	return result;
+}
+
 static void generateRockGeom()
 {
 	struct GeomGenData {
 		GeomGenData()
-			: m_vertData()
-			, m_indexData()
 		{}
 
-		std::vector<float> m_vertData;
-		std::vector<unsigned short> m_indexData;
+		std::shared_ptr<TriSoup> m_mesh;
 	};
 
 	auto data = std::make_shared<GeomGenData>();
 
 	auto runFunc = [data]() {
-		auto densityKernel = g_rockGenProgram->CreateKernel("generateRockDensity");
-		if(!densityKernel)
-			return;
+		// Create the density texture
+		constexpr int kDensityDim = 32;
+		std::vector<float> densityField = computeDensityField(kDensityDim, kDensityDim, kDensityDim);
 
-		constexpr int kDensityDim = 512;
-		constexpr int densityBufferSliceSize = kDensityDim * kDensityDim ;
-		auto densityBufferA = compute_CreateBufferRW(densityBufferSliceSize);
-		auto densityBufferB = compute_CreateBufferRW(densityBufferSliceSize);
-
-		densityKernel->SetArgVal(1, 0.5f); // radius
-		densityKernel->SetArg(2, sizeof(cl_float3), (cl_float3[]){{{10.0f,10.0f,10.0f}}});
-		densityKernel->SetArgVal(3, 2.f); // H
-		densityKernel->SetArgVal(4, 0.7f); // lacunarity
-		densityKernel->SetArgVal(5, 8.8f); // octaves
-
-		std::vector<unsigned char> hostDensityBuffer(densityBufferSliceSize * kDensityDim);
-
-		int curBuffer = 0;
-		ComputeEvent lastEvent[2];
-		const ComputeBuffer* buffers[2] = { densityBufferA.get(), densityBufferB.get() };
-		for(int z = 0; z < kDensityDim; ++z)
-		{
-			densityKernel->SetArg(0, buffers[curBuffer]);
-			densityKernel->SetArgVal(6, z / float(kDensityDim - 1)); // zCoord
-			auto taskEv = densityKernel->EnqueueEv(2, 
-					(const size_t[]){0, 0},
-					(const size_t[]){kDensityDim, kDensityDim},
-					(const size_t[]){16,16},
-					lastEvent[curBuffer].m_event ? 1 : 0, 
-					(const cl_event[]){lastEvent[curBuffer].m_event});
-			auto readEv = buffers[curBuffer]->EnqueueRead(0, densityBufferSliceSize, 
-					&hostDensityBuffer[z * densityBufferSliceSize], 
-					1, (const cl_event[]){taskEv.m_event});
-			lastEvent[curBuffer] = readEv;
-			curBuffer = curBuffer ^ 1;
-		}
-
-		ComputeEvent ev = compute_EnqueueMarker();
-		compute_EnqueueWaitForEvent(ev);
-
-
-		//// TODO OpenCl marching tetrahedrons
-		//auto surfConCountKernel = g_surfConProgram->CreateKernel("countFaces");
-		//if(!surfConCountKernel)
-		//{
-		//	std::cerr << "failed to create surfcon count kernel" << std::endl;
-		//	return;
-		//}
-		//auto surfConCreateKernel = g_surfConProgram->CreateKernel("createFaces");
-		//if(!surfConCreateKernel)
-		//{
-		//	std::cerr << "failed to create surfcon create kernel" << std::endl;
-		//	return;
-		//}
-
-		// kick marching tetrahedrons
-		// first count how many triangles we need so we can allocate buffers
-
-		// TODO create geom from marching tetrahedron output
-		compute_Finish();
+		data->m_mesh = surfcon_CreateMeshFromDensityField(
+			m_densityParams.m_isolevel, 
+			&densityField[0], 
+			kDensityDim, kDensityDim, kDensityDim);
+		data->m_mesh->ComputeNormals();
 	};
 
 	auto completeFunc = [data]() {
-		// TODO.
-		g_rockGeom = render_GenerateSphereGeom(100,100);
+		g_rockGeom = data->m_mesh->CreateGeom();
 	};
 
 	task_AppendTask(std::make_shared<Task>(nullptr, completeFunc, runFunc));
@@ -628,7 +657,6 @@ static void initialize()
 	compute_Init(g_defaultComputeDevice.c_str());
 	g_defaultComputeDevice = compute_GetCurrentDeviceName();
 	g_rockGenProgram = compute_CompileProgram("programs/rock.cl");
-	//g_surfConProgram = compute_CompileProgram("programs/surfcon.cl");
 	g_rockShader = render_CompileShader("shaders/rock.glsl", g_rockShaderUniforms);
 	generateRockTexture();
 	// placeholder geom while it's being generated.

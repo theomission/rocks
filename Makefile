@@ -52,6 +52,8 @@ OBJECTS := \
 	$(OBJDIR)/ui.o \
 	$(OBJDIR)/timer.o \
 	$(OBJDIR)/compute.o \
+	$(OBJDIR)/mesh.o \
+	$(OBJDIR)/surfcon.o \
 
 .PHONY: clean strip
 
@@ -132,7 +134,13 @@ $(OBJDIR)/timer.o: timer.cpp
 	$(COMPILE) $(CPPFLAGS) -o "$@" -c "$<"
 
 $(OBJDIR)/compute.o: compute.cpp
-	$(COMPILE) $(CPPFLAGS) -Wno-comment -o "$@" -c "$<"
+	$(COMPILE) $(CPPFLAGS) -o "$@" -c "$<"
+
+$(OBJDIR)/mesh.o: mesh.cpp
+	$(COMPILE) $(CPPFLAGS) -o "$@" -c "$<"
+
+$(OBJDIR)/surfcon.o: surfcon.cpp
+	$(COMPILE) $(CPPFLAGS) -o "$@" -c "$<"
 
 -include $(OBJECTS:%.o=%.d)
 

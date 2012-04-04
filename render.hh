@@ -78,6 +78,10 @@ public:
 		int numIndices, const unsigned short* indices,
 		int vertStride, int glPrimType, 
 		const std::vector<GeomBindPair>& elements);
+	Geom(int numVerts, const float* verts, 
+		int numIndices, const unsigned int* indices,
+		int vertStride, int glPrimType, 
+		const std::vector<GeomBindPair>& elements);
 	~Geom();
 
 	// one-off render
@@ -91,6 +95,7 @@ private:
 	GLuint m_buffer[2];
 	int m_stride;
 	int m_glPrimType;
+	int m_glIndexType;
 	int m_numIndices;
 	std::vector<GeomBindPair> m_elements;
 };

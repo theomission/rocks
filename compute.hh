@@ -114,7 +114,10 @@ public:
 	ComputeImage(cl_context ctx, cl_mem_flags flags, GLenum target, GLuint texture);
 	~ComputeImage();
 
-	ComputeEvent EnqueueRead(const size_t origin[3], const size_t region[3], void* ptr);
+	ComputeEvent EnqueueRead(const size_t origin[3], const size_t region[3], void* ptr,
+		size_t rowPitch = 0, size_t slicePitch = 0, cl_uint numEvents = 0, const cl_event* events = nullptr);
+	ComputeEvent EnqueueWrite(const size_t origin[3], const size_t region[3], const void* ptr,
+		size_t rowPitch = 0, size_t slicePitch = 0, cl_uint numEvents = 0, const cl_event* events = nullptr);
 private:
 	cl_mem m_mem;
 };
@@ -163,7 +166,13 @@ std::shared_ptr<ComputeBuffer> compute_CreateBufferWO(size_t size);
 
 std::shared_ptr<ComputeImage> compute_CreateImage2DWO(size_t width, size_t height, 
 	cl_channel_order ord, cl_channel_type type);
+std::shared_ptr<ComputeImage> compute_CreateImage2DRW(size_t width, size_t height, 
+	cl_channel_order ord, cl_channel_type type);
 std::shared_ptr<ComputeImage> compute_CreateImage3DWO(size_t width, size_t height, size_t depth,
+	cl_channel_order ord, cl_channel_type type);
+std::shared_ptr<ComputeImage> compute_CreateImage3DRO(size_t width, size_t height, size_t depth,
+	cl_channel_order ord, cl_channel_type type);
+std::shared_ptr<ComputeImage> compute_CreateImage3DRW(size_t width, size_t height, size_t depth,
 	cl_channel_order ord, cl_channel_type type);
 std::shared_ptr<ComputeImage> compute_CreateImageFromGLWO(GLenum target, GLuint tex);
 void compute_EnqueueWaitForEvent(const ComputeEvent& event);
