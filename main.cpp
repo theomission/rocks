@@ -146,7 +146,7 @@ static Limits<float> g_recordTimeRange;
 std::string g_defaultComputeDevice;
 
 // demo specific stuff:
-static constexpr int kShadowTexDim = 512;
+static constexpr int kShadowTexDim = 1024;
 static Framebuffer g_shadowFbo(kShadowTexDim, kShadowTexDim);
 static constexpr int kRockTextureDim = 1024;
 static GLuint g_rockTexture;
@@ -443,7 +443,7 @@ static void drawRockGeom(const vec3& sundir, const mat4& matProjView)
 	mat4 modelIT = TransposeOfInverse(model);
 	mat4 mvp = matProjView * model;
 	mat4 lightProjView = 
-		ComputeOrthoProj(kShadowTexDim, kShadowTexDim, 1.f, 10000.0f) *
+		ComputeOrthoProj(400, 400, 1.f, 10000.0f) *
 		ComputeDirShadowView(vec3(0), sundir, 500.0) ;
 	mat4 shadowMat = 
 		lightProjView * model;

@@ -2,10 +2,10 @@
 "cam.focus" = -266.522 : c38542d3 535.806 : 4405f39a 154.678 : 431aad7b
 "cam.up" = 0.111452 : 3de440bd -0.224058 : be656f88 0.968182 : 3f77dac7
 "cam.orbitFocus" = 0 : 0 0 : 0 0 : 0
-"cam.orbitStart" = 148.372 : 43145f4c -3.88966 : c078f040 58.5936 : 426a5fd2
+"cam.orbitStart" = 148.372 : 43145f4c -3.88966 : c078f040 88.5936 : 42b12fe9
 "cam.orbitRate" = 0.117453 : 3df08b4f
-"cam.orbitLength" = 419.1 : 43d18ccc
-"lighting.sundir" = -0.0265016 : bcd919e8 -0.813854 : bf5058c0 0.580406 : 3f149585
+"cam.orbitLength" = 370.1 : 43b90ccc
+"lighting.sundir" = -0.0265016 : bcd919e8 -0.782363 : bf4848ee 0.622205 : 3f1f48d3
 "lighting.suncolor" = 1 : 3f800000 1 : 3f800000 1 : 3f800000
 "rocktexture.marbleDepth" = 6
 "rocktexture.marbleTurb" = 2.26 : 4010a3da
