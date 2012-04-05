@@ -90,6 +90,7 @@ __kernel void generateRockDensity(
 	float H,
 	float lacunarity,
 	float octaves,
+	float noiseAmp,
 	float zCoord
 	)
 {
@@ -101,10 +102,10 @@ __kernel void generateRockDensity(
 	float3 diff = pt - center;
 	float len = length(diff);
 
-	len += 0.03 * fbmNoise3(pt * noiseScale, H, lacunarity, octaves);
+	len += noiseAmp * fbmNoise3(pt * noiseScale, H, lacunarity, octaves);
 
 	int index = coords.x + coords.y * dims.x;
-	float density = len - radius;//smoothstep(0, 0.1, radius - len);
+	float density = len - radius;
 	outDensity[index] = density;
 }
 

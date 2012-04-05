@@ -2,11 +2,12 @@
 #include "shaders/debugtex_common.glsl"
 #endif
 
-#ifdef FRAGMENT_P
 uniform sampler1D colorTex1d;
 uniform sampler2D colorTex2d;
 uniform int channel;
 uniform int dims;
+
+#ifdef FRAGMENT_P
 in vec2 vUV;
 out vec4 outColor;
 void main()

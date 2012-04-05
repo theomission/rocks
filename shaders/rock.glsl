@@ -4,14 +4,16 @@ uniform mat4 modelIT;
 uniform vec3 eyePos;
 uniform vec3 sundir = vec3(1,1,1);
 uniform vec3 sunColor = vec3(1,1,1);
-uniform float shininess = 5;
-uniform float ambient = 0.5;
-uniform float Ka = 1;
+uniform float shininess = 50;
+uniform float ambient = 0.3;
+uniform float Ka = 1.0;
 uniform float Kd = 0.8;
 uniform float Ks = 0.05;
 uniform vec2 texDim;
 uniform sampler2D heightMap;
 uniform sampler2D diffuseMap;
+uniform sampler2DShadow shadowMap;
+uniform mat4 shadowMat;
 
 const float PI = 3.14159265358979;
 const float invPI = 1.0 / PI;
@@ -24,6 +26,7 @@ out vec2 vCoord0;
 out vec2 vCoord1;
 out vec2 vCoord2;
 out vec3 vPos;
+out vec4 vShadowMapCoord;
 void main()
 {
 	gl_Position = mvp * vec4(pos, 1);
@@ -34,6 +37,7 @@ void main()
 	vCoord0 = pos.xz * 0.5 + 0.5;
 	vCoord1 = pos.yz * 0.5 + 0.5;
 	vCoord2 = pos.xy * 0.5 + 0.5;
+	vShadowMapCoord = shadowMat * vec4(pos, 1);
 }
 #endif
 
@@ -100,9 +104,11 @@ in vec2 vCoord0;
 in vec2 vCoord1;
 in vec2 vCoord2;
 in vec3	vPos;
+in vec4 vShadowMapCoord;
 out vec4 outColor;
 void main()
 {
+	float shadowVis = textureProj(shadowMap, vShadowMapCoord);
 	vec3 N = normalize(vNormal);
 	N = PerturbNormal(vPos, N, vCoord0, vCoord1, vCoord2);
 	vec3 V = normalize(vToEye);
@@ -124,7 +130,7 @@ void main()
 	float specularLight = Ks * specularAmount ;
 	float ambientLight = Ka * ambient ;
 
-	vec3 combined = albedo * sunColor * (diffuseLight + specularLight + ambientLight);
+	vec3 combined = albedo * sunColor * (shadowVis * (diffuseLight + specularLight) + ambientLight);
 	combined = pow(combined, vec3(2.2));
 	outColor = vec4(combined, 1);
 }

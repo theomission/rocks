@@ -76,6 +76,7 @@ public:
 		, m_H(2.f)
 		, m_lacunarity(0.7f)
 		, m_octaves(8.8f)
+		, m_noiseAmp(0.01f)
 		, m_isolevel(0.f)
 	{}
 
@@ -84,6 +85,7 @@ public:
 	float m_H;
 	float m_lacunarity;
 	float m_octaves;
+	float m_noiseAmp;
 	float m_isolevel;
 };
 
@@ -144,6 +146,8 @@ static Limits<float> g_recordTimeRange;
 std::string g_defaultComputeDevice;
 
 // demo specific stuff:
+static constexpr int kShadowTexDim = 512;
+static Framebuffer g_shadowFbo(kShadowTexDim, kShadowTexDim);
 static constexpr int kRockTextureDim = 1024;
 static GLuint g_rockTexture;
 static GLuint g_rockHeightTexture;
@@ -159,15 +163,21 @@ enum RockUniformLocType {
 	ROCKBIND_DiffuseMap,
 	ROCKBIND_HeightMap,
 	ROCKBIND_TexDim,
+	ROCKBIND_ShadowMap,
+	ROCKBIND_ShadowMatrix,
 };
 
 static const std::vector<CustomShaderAttr> g_rockShaderUniforms = {
 	{ ROCKBIND_DiffuseMap, "diffuseMap" },
 	{ ROCKBIND_HeightMap, "heightMap" },
 	{ ROCKBIND_TexDim, "texDim" },
+	{ ROCKBIND_ShadowMap, "shadowMap" },
+	{ ROCKBIND_ShadowMatrix, "shadowMat" },
 };
 
 static std::shared_ptr<ShaderInfo> g_rockShader ;
+
+static std::shared_ptr<ShaderInfo> g_shadowShader ;
 
 ////////////////////////////////////////////////////////////////////////////////
 // forward decls
@@ -207,6 +217,7 @@ static std::vector<std::shared_ptr<TweakVarBase>> g_tweakVars = {
 	std::make_shared<TweakFloat>("rockdensity.H", &m_densityParams.m_H, 2.f),
 	std::make_shared<TweakFloat>("rockdensity.lacunarity", &m_densityParams.m_lacunarity, 0.7f),
 	std::make_shared<TweakFloat>("rockdensity.octaves", &m_densityParams.m_octaves, 8.8f),
+	std::make_shared<TweakFloat>("rockdensity.noiseAmplitude", &m_densityParams.m_noiseAmp, 0.01f),
 	std::make_shared<TweakFloat>("rockdensity.isolevel", &m_densityParams.m_isolevel, 0.0f),
 };
 
@@ -313,6 +324,7 @@ static std::shared_ptr<TopMenuItem> MakeMenu()
 		std::make_shared<FloatSliderMenuItem>("H", &m_densityParams.m_H, 0.1f),
 		std::make_shared<FloatSliderMenuItem>("lacunarity", &m_densityParams.m_lacunarity, 0.1f),
 		std::make_shared<FloatSliderMenuItem>("octaves", &m_densityParams.m_octaves, 1.f),
+		std::make_shared<FloatSliderMenuItem>("noise amplitude", &m_densityParams.m_noiseAmp, 0.01f),
 		std::make_shared<FloatSliderMenuItem>("isolevel", &m_densityParams.m_isolevel, 0.1f),
 		std::make_shared<ButtonMenuItem>("recompile", [](){ g_rockGenProgram->Recompile(); }),
 	};
@@ -373,14 +385,41 @@ static void record_Advance()
 	std::cout << "done." << std::endl;
 }
 
+////////////////////////////////////////////////////////////////////////////////
 static void drawRockGeom(const vec3& sundir, const mat4& matProjView)
 {
 	if(!g_rockGeom) return;
 	mat4 model = MakeScale(vec3(100.0f));
 	mat4 modelIT = TransposeOfInverse(model);
 	mat4 mvp = matProjView * model;
+	mat4 shadowMat = 
+		ComputeOrthoProj(kShadowTexDim, kShadowTexDim, 1.f, 10000.0f) *
+		ComputeDirShadowView(vec3(0), sundir, 500.0) * 
+		model;
+	mat4 lightMatrix = MakeCoordinateScale(0.5, 0.5) * shadowMat;
+
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_BACK);
 
 	const ShaderInfo* shader = nullptr;
+	
+	g_shadowFbo.Bind();
+	{
+		ViewportState vpState(0,0,kShadowTexDim, kShadowTexDim);
+		glClear(GL_DEPTH_BUFFER_BIT);
+		shader = g_shadowShader.get();
+		glUseProgram(shader->m_program);
+
+		GLint mvpLoc = shader->m_uniforms[BIND_Mvp];
+		glUniformMatrix4fv(mvpLoc, 1, 0, shadowMat.m);
+
+		glPolygonOffset(2.5f, 10.f);
+		glEnable(GL_POLYGON_OFFSET_FILL);
+		g_rockGeom->Render(*shader);
+		glDisable(GL_POLYGON_OFFSET_FILL);
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	shader = g_rockShader.get();
 	glUseProgram(shader->m_program);
 
@@ -393,24 +432,29 @@ static void drawRockGeom(const vec3& sundir, const mat4& matProjView)
 	GLint diffuseMapLoc = shader->m_custom[ROCKBIND_DiffuseMap];
 	GLint heightMapLoc = shader->m_custom[ROCKBIND_HeightMap];
 	GLint texDimLoc = shader->m_custom[ROCKBIND_TexDim];
+	GLint shadowMapLoc = shader->m_custom[ROCKBIND_ShadowMap];
+	GLint shadowMatrixLoc = shader->m_custom[ROCKBIND_ShadowMatrix];
 
 	glUniformMatrix4fv(mvpLoc, 1, 0, mvp.m);
 	glUniformMatrix4fv(modelLoc, 1, 0, model.m);
 	glUniformMatrix4fv(modelITLoc, 1, 0, modelIT.m);
+	glUniformMatrix4fv(shadowMatrixLoc, 1, 0, lightMatrix.m);
 	glUniform3fv(sundirLoc, 1, &sundir.x);
 	glUniform3fv(sunColorLoc, 1, &g_sunColor.r);
 	glUniform3fv(eyePosLoc, 1, &g_curCamera->GetPos().x);
+	constexpr float invTexDim = 1.0 / kRockTextureDim;
+	glUniform2f(texDimLoc, invTexDim, invTexDim);
+	
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, g_rockTexture);
 	glUniform1i(diffuseMapLoc, 0);
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, g_rockHeightTexture);
 	glUniform1i(heightMapLoc, 1);
-	constexpr float invTexDim = 1.0 / kRockTextureDim;
-	glUniform2f(texDimLoc, invTexDim, invTexDim);
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D, g_shadowFbo.GetDepthTexture());
+	glUniform1i(shadowMapLoc, 2);
 
-	glEnable(GL_CULL_FACE);
-	glCullFace(GL_BACK);
 	g_rockGeom->Render(*shader);
 	glDisable(GL_CULL_FACE);
 }
@@ -422,7 +466,6 @@ static void draw(Framedata& frame)
 	glDisable(GL_SCISSOR_TEST);
 	glClearColor(0.0f,0.0f,0.0f,1.f);
 	glClear(GL_DEPTH_BUFFER_BIT|GL_COLOR_BUFFER_BIT);
-	glEnable(GL_DEPTH_TEST);
 	int scissorHeight = g_screen.m_width/1.777;
 	glScissor(0, 0.5*(g_screen.m_height - scissorHeight), g_screen.m_width, scissorHeight);
 	if(!camera_GetDebugCamera()) {
@@ -617,6 +660,7 @@ std::vector<float> computeDensityField(unsigned int width, unsigned int height, 
 	densityKernel->SetArg(3, &m_densityParams.m_H); // H
 	densityKernel->SetArg(4, &m_densityParams.m_lacunarity); // lacunarity
 	densityKernel->SetArg(5, &m_densityParams.m_octaves); // octaves
+	densityKernel->SetArg(6, &m_densityParams.m_noiseAmp); // amplitude  
 
 	auto densityBufferA = compute_CreateBufferRW(densityBufferSliceSize);
 	auto densityBufferB = compute_CreateBufferRW(densityBufferSliceSize);
@@ -628,7 +672,7 @@ std::vector<float> computeDensityField(unsigned int width, unsigned int height, 
 	for(unsigned int z = 0; z < depth; ++z)
 	{
 		densityKernel->SetArg(0, buffers[curBuffer]);
-		densityKernel->SetArgVal(6, z / float(depth - 1)); // zCoord
+		densityKernel->SetArgVal(7, z / float(depth - 1)); // zCoord
 		auto taskEv = densityKernel->EnqueueEv(2, 
 				(const size_t[]){width, height},
 				nullptr,
@@ -695,6 +739,7 @@ static void initialize()
 	g_defaultComputeDevice = compute_GetCurrentDeviceName();
 	g_rockGenProgram = compute_CompileProgram("programs/rock.cl");
 	g_rockShader = render_CompileShader("shaders/rock.glsl", g_rockShaderUniforms);
+	g_shadowShader = render_CompileShader("shaders/shadow.glsl");
 	generateRockTexture();
 	// placeholder geom while it's being generated.
 	g_rockGeom = render_GenerateSphereGeom(10,10);
@@ -705,6 +750,9 @@ static void initialize()
 
 	g_mainCamera->LookAt(g_defaultFocus, g_defaultEye, Normalize(g_defaultUp));
 	g_curCamera = g_mainCamera;
+
+	g_shadowFbo.AddShadowDepthTexture();
+	g_shadowFbo.Create();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

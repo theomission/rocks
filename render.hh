@@ -188,9 +188,11 @@ public:
 	Framebuffer& operator=(const Framebuffer&) = delete;
 
 	void AddDepth(bool stencil = false);
+	void AddShadowDepthTexture();
 	void AddTexture(int internalFormat, int format, int dataType);
 	void AddTexture3D(int internalFormat, int format, int dataType);
 	GLuint GetTexture(int index) const { return m_tbo[index].tex; }
+	GLuint GetDepthTexture() const { return m_depthTex; }
 	void Create();
 
 	void Bind() const;
@@ -205,6 +207,7 @@ private:
 	};
 	GLuint m_fbo;
 	GLuint m_rboDepth;
+	GLuint m_depthTex;
 	bool m_hasStencil;
 	int m_width;
 	int m_height;

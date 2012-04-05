@@ -709,6 +709,7 @@ Framebuffer::Framebuffer(int width, int height, int layers)
 Framebuffer::Framebuffer(Framebuffer&& other)
 	: m_fbo(0)
 	, m_rboDepth(0)
+	, m_depthTex(0)
 	, m_hasStencil(false)
 	, m_width(0)
 	, m_height(0)
@@ -732,10 +733,13 @@ Framebuffer::~Framebuffer()
 		glDeleteRenderbuffers(1, &m_rboDepth);
 	if(m_fbo)
 		glDeleteFramebuffers(1, &m_fbo);
+	if(m_depthTex)
+		glDeleteTextures(1, &m_depthTex);
 }
 
 void Framebuffer::AddDepth(bool stencil)
 {
+	ASSERT(m_depthTex == 0);
 	m_hasStencil = stencil;
 	glGenRenderbuffers(1, &m_rboDepth);
 	glBindRenderbuffer(GL_RENDERBUFFER, m_rboDepth);
@@ -744,13 +748,34 @@ void Framebuffer::AddDepth(bool stencil)
 	glBindRenderbuffer(GL_RENDERBUFFER, 0);
 }
 
+void Framebuffer::AddShadowDepthTexture()
+{
+	ASSERT(m_rboDepth == 0);
+	m_hasStencil = false;
+	glGenTextures(1, &m_depthTex);
+	glBindTexture(GL_TEXTURE_2D, m_depthTex);
+	glTexImage2D(GL_TEXTURE_2D, 0, 
+		GL_DEPTH_COMPONENT32, m_width, m_height, 0, 
+		GL_DEPTH_COMPONENT, 
+		GL_FLOAT, 0);
+	render_SetTextureParameters(GL_CLAMP_TO_BORDER, GL_CLAMP_TO_BORDER, GL_LINEAR, GL_LINEAR);
+	glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, (const GLfloat []){1.f,1.f,1.f,1.f});
+	// ref will be the projected 'z' coordinate in the shadow, so z values closer to the camera have
+	// visibility of 1.0f
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+	
+	checkGlError("Framebuffer::AddTexture");
+	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 void Framebuffer::AddTexture(int internalFormat, int format, int dataType)
 {
 	GLuint tex;
 	glGenTextures(1, &tex);
 	glBindTexture(GL_TEXTURE_2D, tex);
-	render_SetTextureParameters(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_LINEAR, GL_LINEAR);
 	glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, m_width, m_height, 0, format, dataType, 0);
+	render_SetTextureParameters(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_LINEAR, GL_LINEAR);
 	m_tbo.emplace_back(GL_TEXTURE_2D, tex);
 	checkGlError("Framebuffer::AddTexture");
 	glBindTexture(GL_TEXTURE_2D, 0);
@@ -777,8 +802,14 @@ void Framebuffer::Create()
 {	
 	glGenFramebuffers(1, &m_fbo);
 	glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, m_hasStencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
-		GL_RENDERBUFFER, m_rboDepth);
+	if(m_rboDepth)
+		glFramebufferRenderbuffer(GL_FRAMEBUFFER, 
+			m_hasStencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_rboDepth);
+	else if(m_depthTex)
+		glFramebufferTexture2D(GL_FRAMEBUFFER, 
+			m_hasStencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
+			GL_TEXTURE_2D, m_depthTex, 0);
+
 	for(int i = 0, c = m_tbo.size(); i < c; ++i)
 	{
 		if(m_tbo[i].type == GL_TEXTURE_2D) {
