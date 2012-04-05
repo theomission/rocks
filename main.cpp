@@ -155,6 +155,7 @@ static std::shared_ptr<Geom> g_rockGeom;
 static RockTextureParams m_rockParams;
 static RockDensityParams m_densityParams;
 static std::shared_ptr<ComputeProgram> g_rockGenProgram;
+static std::shared_ptr<Geom> g_groundGeom;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Shaders
@@ -178,6 +179,18 @@ static const std::vector<CustomShaderAttr> g_rockShaderUniforms = {
 static std::shared_ptr<ShaderInfo> g_rockShader ;
 
 static std::shared_ptr<ShaderInfo> g_shadowShader ;
+
+enum GroundUniformLocType {
+	GRNDBIND_ShadowMap,
+	GRNDBIND_ShadowMatrix,
+};
+
+static std::vector<CustomShaderAttr> g_groundUniforms =
+{
+	{ GRNDBIND_ShadowMap, "shadowMap" },
+	{ GRNDBIND_ShadowMatrix, "shadowMat" },
+};
+static std::shared_ptr<ShaderInfo> g_groundShader;
 
 ////////////////////////////////////////////////////////////////////////////////
 // forward decls
@@ -386,16 +399,54 @@ static void record_Advance()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+static void drawGround(const vec3& sundir, const mat4& lightProjView)
+{
+	mat4 projview = g_curCamera->GetProj() * g_curCamera->GetView();
+	mat4 model = MakeTranslation(0,0,-100) * MakeScale(vec3(500));
+	mat4 modelIT = TransposeOfInverse(model);
+	mat4 mvp = projview * model;
+
+	mat4 lightMatrix = MakeCoordinateScale(0.5, 0.5) * lightProjView * model;
+
+	const ShaderInfo* shader = g_groundShader.get();
+
+	GLint mvpLoc = shader->m_uniforms[BIND_Mvp];
+	GLint modelLoc = shader->m_uniforms[BIND_Model];
+	GLint modelITLoc = shader->m_uniforms[BIND_ModelIT];
+	GLint sundirLoc = shader->m_uniforms[BIND_Sundir];
+	GLint sunColorLoc = shader->m_uniforms[BIND_SunColor];
+	GLint eyePosLoc = shader->m_uniforms[BIND_Eyepos];
+	GLint shadowMatrixLoc = shader->m_custom[GRNDBIND_ShadowMatrix];
+	GLint shadowMapLoc = shader->m_custom[GRNDBIND_ShadowMap];
+
+	glUseProgram(shader->m_program);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, g_shadowFbo.GetDepthTexture());
+	glUniform1i(shadowMapLoc, 0);
+
+	glUniformMatrix4fv(mvpLoc, 1, 0, mvp.m);
+	glUniformMatrix4fv(modelLoc, 1, 0, model.m);
+	glUniformMatrix4fv(modelITLoc, 1, 0, modelIT.m);
+	glUniformMatrix4fv(shadowMatrixLoc, 1, 0, lightMatrix.m);
+	glUniform3fv(sundirLoc, 1, &sundir.x);
+	glUniform3fv(sunColorLoc, 1, &g_sunColor.r);
+	glUniform3fv(eyePosLoc, 1, &g_curCamera->GetPos().x);
+
+	g_groundGeom->Render(*shader);
+}
+
 static void drawRockGeom(const vec3& sundir, const mat4& matProjView)
 {
 	if(!g_rockGeom) return;
 	mat4 model = MakeScale(vec3(100.0f));
 	mat4 modelIT = TransposeOfInverse(model);
 	mat4 mvp = matProjView * model;
-	mat4 shadowMat = 
+	mat4 lightProjView = 
 		ComputeOrthoProj(kShadowTexDim, kShadowTexDim, 1.f, 10000.0f) *
-		ComputeDirShadowView(vec3(0), sundir, 500.0) * 
-		model;
+		ComputeDirShadowView(vec3(0), sundir, 500.0) ;
+	mat4 shadowMat = 
+		lightProjView * model;
 	mat4 lightMatrix = MakeCoordinateScale(0.5, 0.5) * shadowMat;
 
 	glEnable(GL_CULL_FACE);
@@ -456,6 +507,9 @@ static void drawRockGeom(const vec3& sundir, const mat4& matProjView)
 	glUniform1i(shadowMapLoc, 2);
 
 	g_rockGeom->Render(*shader);
+
+	drawGround(sundir, lightProjView);
+
 	glDisable(GL_CULL_FACE);
 }
 
@@ -744,6 +798,8 @@ static void initialize()
 	// placeholder geom while it's being generated.
 	g_rockGeom = render_GenerateSphereGeom(10,10);
 	generateRockGeom();
+	g_groundGeom = render_GeneratePlaneGeom();
+	g_groundShader = render_CompileShader("shaders/ground.glsl", g_groundUniforms);
 
 	g_mainCamera = std::make_shared<Camera>(30.f, g_screen.m_aspect);
 	g_debugCamera = std::make_shared<Camera>(30.f, g_screen.m_aspect);

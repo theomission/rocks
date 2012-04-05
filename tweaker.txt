@@ -4,8 +4,8 @@
 "cam.orbitFocus" = 0 : 0 0 : 0 0 : 0
 "cam.orbitStart" = 148.372 : 43145f4c -3.88966 : c078f040 58.5936 : 426a5fd2
 "cam.orbitRate" = 0.117453 : 3df08b4f
-"cam.orbitLength" = 329.1 : 43a48ccc
-"lighting.sundir" = -0.0265016 : bcd919e8 -0.446107 : bee46822 0.89455 : 3f65013c
+"cam.orbitLength" = 419.1 : 43d18ccc
+"lighting.sundir" = -0.0265016 : bcd919e8 -0.813854 : bf5058c0 0.580406 : 3f149585
 "lighting.suncolor" = 1 : 3f800000 1 : 3f800000 1 : 3f800000
 "rocktexture.marbleDepth" = 6
 "rocktexture.marbleTurb" = 2.26 : 4010a3da
@@ -21,10 +21,10 @@
 "rocktexture.H" = 1.9 : 3ff33332
 "rocktexture.octaves" = 4
 "rocktexture.offset" = 2 : 40000008
-"rockdensity.radius" = 0.33 : 3ea8f5cb
+"rockdensity.radius" = 0.32 : 3ea3d713
 "rockdensity.noiseScale" = 6.67614 : 40d5a2e8 6.65627 : 40d50026 8.50355 : 41080e8a
 "rockdensity.H" = 1.3 : 3fa66664
-"rockdensity.lacunarity" = 0.84 : 3f570a44
-"rockdensity.octaves" = 10.9 : 412e6664
-"rockdensity.noiseAmplitude" = 0.04 : 3d23d70d
-"rockdensity.isolevel" = -0.02 : bca3d70e
+"rockdensity.lacunarity" = 0.86 : 3f5c28fc
+"rockdensity.octaves" = 10.8 : 412cccca
+"rockdensity.noiseAmplitude" = 0.039 : 3d1fbe7a
+"rockdensity.isolevel" = 0.02 : 3ca3d702
