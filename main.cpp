@@ -7,6 +7,7 @@
 #include <memory>
 #include <sstream>
 #include <sys/stat.h>
+#include <random>
 #include "common.hh"
 #include "render.hh"
 #include "vec.hh"
@@ -379,7 +380,8 @@ static void drawRockGeom(const vec3& sundir, const mat4& matProjView)
 	mat4 modelIT = TransposeOfInverse(model);
 	mat4 mvp = matProjView * model;
 
-	const ShaderInfo* shader = g_rockShader.get();
+	const ShaderInfo* shader = nullptr;
+	shader = g_rockShader.get();
 	glUseProgram(shader->m_program);
 
 	GLint mvpLoc = shader->m_uniforms[BIND_Mvp];
@@ -489,6 +491,37 @@ static void draw(Framedata& frame)
 }
 
 ////////////////////////////////////////////////////////////////////////////////	
+//static std::shared_ptr<ComputeImage> generateVoronoiImage()
+//{
+//	auto voronoiKernel = g_rockGenProgram->CreateKernel("generateVoronoiTexture");
+//	auto voronoiObj = compute_CreateImage2DRW(kRockTextureDim, kRockTextureDim, CL_R, CL_UNORM_INT8);
+//	if(!voronoiKernel) 
+//		return voronoiObj;
+//
+//	const int numPoints = 100;
+//	std::vector<float> pointData(numPoints*2);
+//
+//	std::mt19937 gen(1234);
+//	std::uniform_real_distribution<float> dis(0.0f, 1.f);
+//
+//	for(int i = 0, offset = 0; i < numPoints; ++i, offset += 2)
+//	{
+//		pointData[offset] = dis(gen);
+//		pointData[offset+1] = dis(gen);
+//	}
+//
+//	auto pointObj = compute_CreateBufferRO(sizeof(float)*2*numPoints, &pointData[0]);
+//
+//	voronoiKernel->SetArg(0, voronoiObj.get());
+//	voronoiKernel->SetArg(1, &numPoints);
+//	voronoiKernel->SetArg(2, pointObj.get());
+//
+//	auto ev = voronoiKernel->EnqueueEv(2, (const size_t[]){kRockTextureDim, kRockTextureDim});
+//	compute_WaitForEvent(ev);
+//
+//	return voronoiObj;
+//}
+
 static void generateRockTexture()
 {
 	struct RockGenData 

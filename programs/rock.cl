@@ -2,6 +2,7 @@
 
 #define BUMP 1270
 
+//sampler_t voronoiSampler = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_CLAMP | CLK_FILTER_LINEAR;
 __kernel void generateRockTexture(
 	__write_only image2d_t outputImage,
 	__write_only image2d_t heightImage,
@@ -54,6 +55,32 @@ __kernel void generateRockTexture(
 	
 	write_imagef(outputImage, coords, color);
 	write_imagef(heightImage, coords, height);
+}
+
+__kernel void generateVoronoiTexture(
+	__write_only image2d_t outputImage,
+	unsigned int numPoints,
+	__read_only __global float* inputPoints)
+{
+	int2 coords = (int2)(get_global_id(0), get_global_id(1));
+	int2 dims = (int2)(get_global_size(0), get_global_size(1));
+	float2 fcoords = convert_float2(coords) / convert_float2(dims - (int2)(1));
+	fcoords.y = 1 - fcoords.y;
+
+	float2 fdims = convert_float2(dims);
+	const float invMaxLen = rsqrt(2.0);
+	float bestVal = 1.0;
+	for(unsigned int i = 0, offset = 0; i < numPoints; ++i, offset+=2)
+	{
+		float2 pt = (float2)(inputPoints[offset], inputPoints[offset+1]);
+		float2 diff = pt - fcoords;
+		float val = 10 * invMaxLen * sqrt(dot(diff,diff));
+		if(val < bestVal) {
+			bestVal = val;
+		}
+	}
+	
+	write_imagef(outputImage, coords, (float4)(bestVal));
 }
 
 __kernel void generateRockDensity(

@@ -9,7 +9,7 @@
 "lighting.suncolor" = 1 : 3f800000 1 : 3f800000 1 : 3f800000
 "rocktexture.marbleDepth" = 6
 "rocktexture.marbleTurb" = 2.26 : 4010a3da
-"rocktexture.baseColor0" = 0.8 : 3f4ccccc 0.8 : 3f4ccccc 0.747 : 3f3f3b62
+"rocktexture.baseColor0" = 0.8 : 3f4ccccc 0.8 : 3f4ccccc 0.897 : 3f65a1c9
 "rocktexture.baseColor1" = 0.649 : 3f2624db 0.6 : 3f199996 0.55 : 3f0cccce
 "rocktexture.baseColor2" = 0.398 : 3ecbc6a5 0.3 : 3e999999 0.05 : 3d4cccc6
 "rocktexture.darkColor" = 0.2 : 3e4cccd2 1.49012e-08 : 32800000 1.49012e-08 : 32800000
