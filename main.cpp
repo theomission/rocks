@@ -443,7 +443,7 @@ static void drawRockGeom(const vec3& sundir, const mat4& matProjView)
 	mat4 modelIT = TransposeOfInverse(model);
 	mat4 mvp = matProjView * model;
 	mat4 lightProjView = 
-		ComputeOrthoProj(400, 400, 1.f, 10000.0f) *
+		ComputeOrthoProj(600, 600, 1.f, 10000.0f) *
 		ComputeDirShadowView(vec3(0), sundir, 500.0) ;
 	mat4 shadowMat = 
 		lightProjView * model;
