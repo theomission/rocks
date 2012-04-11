@@ -31,15 +31,17 @@ when adjusting:
 Description
 -----------
 
-TODO
+This program generates some geometry and a rocky looking texture. The geometry
+distance field is generated with OpenCL and then is turned into a mesh using
+the marching tetrahedrons algorithm on the CPU. The texture is generated with
+OpenCL as well. The source is written in a subset of C++11 (gcc 4.6.1).
 
-References
-==========
+This was really just an excuse to do something with OpenCL.
 
-TODO
 
-Attributions
-============
+
+Acknowledgements
+================
 
 I used some bits of other people's software. The copyright for each is 
 included below.
